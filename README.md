@@ -8,6 +8,7 @@
 ## AI-Powered Document Review and Routing Agent
 
 DOCUAGENT AI is an intelligent document processing platform that extracts information, validates documents, identifies inconsistencies, and organizes review workflows.
+
 <br>
 <br>
 
@@ -21,12 +22,18 @@ DOCUAGENT AI is an intelligent document processing platform that extracts inform
 - Audit history and reporting
 - Secure document processing workflows
 
+  <br>
+  <br>
+
 ## Technology Stack
 
 - Frontend: React and TypeScript
 - Build Tool: Vite
 - AI: Google Gemini API
 - Backend: Node.js
+
+<br>
+<br>
 
 ## Getting Started
 
@@ -35,6 +42,9 @@ DOCUAGENT AI is an intelligent document processing platform that extracts inform
 3. Configure the required environment variables.
 4. Start the application using the development command defined in `package.json`.
 
+<br>
+<br>
+
 ## Security
 
 - Never commit API keys or passwords.
@@ -42,11 +52,15 @@ DOCUAGENT AI is an intelligent document processing platform that extracts inform
 - Use `.env.example` for documenting required configuration.
 - Restrict access to uploaded documents.
 
+<br>
+<br>
+
 ## Project Status
 
 Under development.
 
-
+<br>
+<br>
 
 # DOCUAGENT AI
 
