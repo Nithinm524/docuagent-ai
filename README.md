@@ -44,7 +44,13 @@ Under development.
 
 
 
-## 🚀 Live Demo
+# DOCUAGENT AI
 
-[![Live Demo](https://img.shields.io/badge/LIVE-DEMO-0F766E?style=for-the-badge)](https://docuagent-ai.ai.studio)
+### AI-Powered Document Review and Routing Agent
+
+🌐 **Live Website:** https://docuagent-ai.ai.studio
+
+🚀 **[OPEN DOCUAGENT AI WEBSITE](https://docuagent-ai.ai.studio)**
+
+
 
