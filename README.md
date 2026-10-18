@@ -46,9 +46,6 @@ DOCUAGENT AI is an intelligent document processing platform that extracts inform
 
 Under development.
 
-<br>
-<br>
-
 
 
 # DOCUAGENT AI
