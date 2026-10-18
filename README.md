@@ -1,6 +1,8 @@
 ## AI-Powered Document Review and Routing Agent
 
 DOCUAGENT AI is an intelligent document processing platform that extracts information, validates documents, identifies inconsistencies, and organizes review workflows.
+<br>
+<br>
 
 ## Features
 
@@ -36,6 +38,9 @@ DOCUAGENT AI is an intelligent document processing platform that extracts inform
 ## Project Status
 
 Under development.
+
+<br>
+<br>
 
 
 
