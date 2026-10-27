@@ -1,16 +1,4 @@
-/**
- * Agent Orchestration Engine
- * DOCUAGENT AI Document Intelligence Platform
- *
- * Implements multi-step agent workflow:
- * 1. Goal Identification & File Ingestion
- * 2. Tool Selection: Multimodal Gemini OCR & Text Extractor
- * 3. Tool Selection: Structured Schema Field Extractor
- * 4. Tool Selection: Deterministic Rule Validation Engine
- * 5. Tool Selection: Decision Matrix & Queue Router
- * 6. Tool Selection: LLM Neutral Executive Summary (Gemini 3.8 Flash)
- * 7. Tool Selection: Audit Persistence
- */
+
 
 import { GoogleGenAI } from '@google/genai';
 import {
@@ -268,9 +256,36 @@ export function extractFieldsFromText(
   const schema = DOCUMENT_SCHEMAS[documentType];
   const fields: ExtractedField[] = [];
   const caseDummyId = 'temp';
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  const normalize = (value: string) =>
+    value.toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const escapeRegex = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const findLabeledValue = (labels: string[]): string => {
+    const sortedLabels = [...labels].filter(Boolean).sort((a, b) => b.length - a.length);
+
+    for (const line of lines) {
+      for (const label of sortedLabels) {
+        const escaped = escapeRegex(label);
+        const match = line.match(new RegExp(`^\\s*${escaped}\\s*[:#-]\\s*(.+?)\\s*$`, 'i'));
+        if (match?.[1]?.trim()) return match[1].trim();
+
+        const spaceMatch = line.match(new RegExp(`^\\s*${escaped}\\s+(.+?)\\s*$`, 'i'));
+        if (spaceMatch?.[1]?.trim()) return spaceMatch[1].trim();
+      }
+    }
+    return '';
+  };
+
+  const dateRegex =
+    /\b(\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b/i;
+  const amountRegex =
+    /(?:₹|Rs\.?|INR|USD|\$|€|£)\s*[\d,]+(?:\.\d{1,2})?|(?:[\d,]+(?:\.\d{1,2})?)/i;
 
   for (const def of schema.fields) {
-    // If manual field provided, use it
     if (manualFields && manualFields[def.name] !== undefined) {
       const val = manualFields[def.name];
       fields.push({
@@ -279,138 +294,210 @@ export function extractFieldsFromText(
         field_name: def.name,
         field_label: def.label,
         field_value: val,
-        confidence: 0.95,
+        confidence: val.trim() ? 0.95 : 0,
         is_uncertain: val.trim().length === 0 && def.required,
         is_edited: false
       });
       continue;
     }
 
-    // Heuristic regex extraction from text lines
     let extractedValue = '';
     let confidence = 0.85;
+    const fieldName = normalize(def.name);
+    const fieldLabel = normalize(def.label);
+    const combinedName = `${fieldName} ${fieldLabel}`;
 
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    // Dates: prioritize lines explicitly labeled as a date.
+    if (def.type === 'date' || /\b(date|issued|expiry|expiration)\b/i.test(combinedName)) {
+      const dateLabels = [
+        fieldLabel, fieldName, 'invoice date', 'bill date', 'document date',
+        'issue date', 'date issued', 'due date', 'payment date', 'expiry date'
+      ];
 
-    if (def.type === 'date') {
-      const dateRegex = /\b(\d{4}[-/.]\d{2}[-/.]\d{2}|\d{2}[-/.]\d{2}[-/.]\d{4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})\b/i;
       for (const line of lines) {
-        if (
-          line.toLowerCase().includes(def.label.toLowerCase()) ||
-          line.toLowerCase().includes(def.name.replace(/_/g, ' '))
-        ) {
-          const m = line.match(dateRegex);
-          if (m) {
-            extractedValue = m[0];
+        const lower = normalize(line);
+        if (dateLabels.some((label) => label && lower.includes(label))) {
+          const match = line.match(dateRegex);
+          if (match) {
+            extractedValue = match[1];
             confidence = 0.92;
             break;
           }
         }
       }
-      if (!extractedValue) {
+
+      if (!extractedValue && /document date|invoice date|bill date/.test(combinedName)) {
         for (const line of lines) {
-          const m = line.match(dateRegex);
-          if (m && !line.toLowerCase().includes('birth') && def.name.includes('expir')) {
-            extractedValue = m[0];
-            confidence = 0.72;
-            break;
-          }
-        }
-      }
-      if (!extractedValue && def.name === 'document_date') {
-        for (const line of lines) {
-          const m = line.match(dateRegex);
-          if (m) {
-            extractedValue = m[0];
-            confidence = 0.85;
-            break;
-          }
-        }
-      }
-    } else if (def.type === 'identifier') {
-      for (const line of lines) {
-        if (
-          line.toLowerCase().includes('no') ||
-          line.toLowerCase().includes('number') ||
-          line.toLowerCase().includes('id:') ||
-          line.toLowerCase().includes('dl:')
-        ) {
-          const match = line.match(/[:#]?\s*([A-Z0-9-]{6,15})\b/i);
+          if (/\b(dob|birth date|date of birth)\b/i.test(line)) continue;
+          const match = line.match(dateRegex);
           if (match) {
             extractedValue = match[1];
-            confidence = 0.94;
+            confidence = 0.78;
             break;
           }
         }
       }
-    } else if (def.name.includes('name')) {
+    }
+    // Invoice/document identifiers: do not match arbitrary substrings such as "no" in "Technologies".
+    else if (
+      def.type === 'identifier' ||
+      /\b(invoice number|invoice no|bill number|bill no|document number|reference number|transaction id)\b/i.test(combinedName)
+    ) {
+      const labels = [
+        'invoice number', 'invoice no', 'invoice #', 'invoice id',
+        'bill number', 'bill no', 'bill #', 'document number',
+        'reference number', 'reference no', 'receipt number', 'receipt no',
+        'order number', 'purchase order', 'transaction id', fieldLabel, fieldName
+      ].filter((label) => normalize(label).length > 2);
+
       for (const line of lines) {
-        if (
-          line.toLowerCase().includes('name:') ||
-          line.toLowerCase().includes('surname:') ||
-          line.toLowerCase().includes('customer:') ||
-          line.toLowerCase().includes('given names:')
-        ) {
-          const parts = line.split(/[:]/);
-          if (parts.length > 1) {
-            extractedValue = parts[1].trim();
-            confidence = 0.93;
-            break;
-          }
-        }
-      }
-    } else if (def.name.includes('address')) {
-      for (const line of lines) {
-        if (
-          line.toLowerCase().includes('address:') ||
-          /\b(st|ave|blvd|rd|way|court|parkway)\b/i.test(line)
-        ) {
-          extractedValue = line.replace(/address:\s*/i, '').trim();
-          confidence = 0.88;
-          break;
-        }
-      }
-    } else if (def.name === 'document_title') {
-      for (const line of lines) {
-        if (/^(title|subject|re|document|contract|agreement|report):/i.test(line)) {
-          extractedValue = line.replace(/^(title|subject|re|document|contract|agreement|report):\s*/i, '').trim();
+        const lower = normalize(line);
+        const matchingLabel = labels
+          .sort((a, b) => b.length - a.length)
+          .find((label) => {
+            const normalizedLabel = normalize(label);
+            return lower.startsWith(`${normalizedLabel}:`) ||
+              lower.startsWith(`${normalizedLabel} #`) ||
+              lower.startsWith(`${normalizedLabel} `) ||
+              lower.startsWith(`${normalizedLabel}-`);
+          });
+
+        if (!matchingLabel) continue;
+
+        const escaped = escapeRegex(matchingLabel);
+        const match = line.match(
+          new RegExp(`^\\s*${escaped}\\s*(?:number|no\\.?|id)?\\s*[:#-]\\s*([A-Z0-9][A-Z0-9/-]{2,30})`, 'i')
+        );
+
+        if (match?.[1]) {
+          extractedValue = match[1].trim();
           confidence = 0.94;
           break;
         }
+
+        const colonIndex = line.indexOf(':');
+        if (colonIndex >= 0) {
+          const candidate = line.slice(colonIndex + 1).trim();
+          if (candidate && candidate.length <= 40) {
+            extractedValue = candidate;
+            confidence = 0.80;
+            break;
+          }
+        }
       }
-      if (!extractedValue && lines.length > 0) {
-        // First significant line
-        extractedValue = lines[0].slice(0, 80).trim();
-        confidence = 0.88;
-      }
-    } else if (def.name === 'author_or_organization') {
+    }
+    // Amounts: prioritize the exact total/payable labels.
+    else if (
+      /\b(amount|total|payable|balance|subtotal|tax|price|cost|currency)\b/i.test(combinedName) ||
+      /\b(amount|currency)\b/i.test(def.type)
+    ) {
+      const labels = [
+        'total payable amount', 'amount payable', 'total amount', 'amount due',
+        'grand total', 'invoice total', 'total payable', 'net amount',
+        'balance due', 'subtotal', 'tax amount', 'total', fieldLabel, fieldName
+      ].filter((label) => normalize(label).length > 2);
+
       for (const line of lines) {
-        if (/^(author|organization|company|issued by|prepared by|party|client):/i.test(line)) {
-          extractedValue = line.replace(/^(author|organization|company|issued by|prepared by|party|client):\s*/i, '').trim();
+        const lower = normalize(line);
+        const matchingLabel = labels
+          .sort((a, b) => b.length - a.length)
+          .find((label) => lower.includes(normalize(label)));
+
+        if (!matchingLabel) continue;
+        const match = line.match(amountRegex);
+        if (match) {
+          extractedValue = match[0].trim();
           confidence = 0.90;
           break;
         }
       }
-    } else if (def.name === 'summary_topic') {
+    }
+    // Names: include common invoice/vendor/customer labels.
+    else if (/\b(name|vendor|supplier|contractor|company|organization|client|customer|billed to|bill to|recipient|payee|seller|buyer)\b/i.test(combinedName)) {
+      const labels = [
+        'vendor name', 'supplier name', 'contractor name', 'vendor', 'supplier',
+        'contractor', 'company name', 'company', 'organization', 'billed to',
+        'bill to', 'client name', 'customer name', 'customer', 'recipient',
+        'payee', 'issued by', 'prepared by', 'seller', 'buyer', fieldLabel, fieldName
+      ].filter((label) => normalize(label).length > 2);
+
       for (const line of lines) {
-        if (/^(summary|topic|purpose|scope|overview):/i.test(line)) {
-          extractedValue = line.replace(/^(summary|topic|purpose|scope|overview):\s*/i, '').trim();
-          confidence = 0.89;
-          break;
+        const lower = normalize(line);
+        const matchingLabel = labels
+          .sort((a, b) => b.length - a.length)
+          .find((label) => {
+            const normalizedLabel = normalize(label);
+            return lower.startsWith(`${normalizedLabel}:`) ||
+              lower.startsWith(`${normalizedLabel} `) ||
+              lower.startsWith(`${normalizedLabel}-`);
+          });
+
+        if (!matchingLabel) continue;
+        const escaped = escapeRegex(matchingLabel);
+        const match = line.match(new RegExp(`^\\s*${escaped}\\s*[:#-]?\\s*(.+?)\\s*$`, 'i'));
+
+        if (match?.[1]?.trim()) {
+          const candidate = match[1].trim();
+          if (!/^(invoice|tax invoice|bill|receipt|date|amount due)$/i.test(candidate)) {
+            extractedValue = candidate;
+            confidence = 0.90;
+            break;
+          }
         }
       }
+    } else if (/\baddress\b/i.test(combinedName)) {
+      extractedValue = findLabeledValue([
+        fieldLabel, fieldName, 'vendor address', 'supplier address',
+        'billing address', 'shipping address', 'address'
+      ]);
+
+      if (extractedValue) {
+        confidence = 0.88;
+      } else {
+        const addressLine = lines.find((line) =>
+          /\b(street|road|rd\.|avenue|ave\.|boulevard|blvd|pin code|postal code)\b/i.test(line)
+        );
+        if (addressLine) {
+          extractedValue = addressLine;
+          confidence = 0.72;
+        }
+      }
+    } else if (fieldName === 'document title' || fieldName === 'title') {
+      const titleLine = lines.find((line) =>
+        /\b(tax invoice|invoice|receipt|purchase order|credit note|debit note)\b/i.test(line)
+      );
+      if (titleLine) {
+        extractedValue = titleLine;
+        confidence = 0.92;
+      } else if (lines.length) {
+        extractedValue = lines[0].slice(0, 100).trim();
+        confidence = 0.65;
+      }
+    } else if (fieldName === 'author or organization') {
+      extractedValue = findLabeledValue([
+        'author', 'organization', 'company', 'issued by', 'prepared by', 'party', 'client'
+      ]);
+      if (extractedValue) confidence = 0.88;
+    } else if (fieldName === 'summary topic') {
+      extractedValue = findLabeledValue(['summary', 'topic', 'purpose', 'scope', 'overview']);
       if (!extractedValue && lines.length > 1) {
         extractedValue = lines.slice(1, 3).join(' ').slice(0, 100).trim();
-        confidence = 0.80;
+        confidence = 0.70;
       }
-    } else if (def.name === 'detected_content') {
+    } else if (fieldName === 'detected content') {
       extractedValue = text.slice(0, 200).trim();
       confidence = 0.50;
+    } else {
+      extractedValue = findLabeledValue([fieldLabel, fieldName]);
+      if (extractedValue) confidence = 0.80;
     }
 
     const isUncertain =
       (def.required && !extractedValue) ||
-      (extractedValue ? (confidence < 0.75 || extractedValue.includes('??') || extractedValue.toLowerCase().includes('unreadable')) : false);
+      (!!extractedValue &&
+        (confidence < 0.75 ||
+          extractedValue.includes('??') ||
+          extractedValue.toLowerCase().includes('unreadable')));
 
     fields.push({
       field_id: `fld-${def.name}`,
@@ -426,7 +513,6 @@ export function extractFieldsFromText(
 
   return fields;
 }
-
 /**
  * Generates an LLM-powered neutral executive summary using Gemini 3.8 Flash,
  * falling back to the deterministic template if the API key is not configured.
@@ -653,12 +739,41 @@ export async function runAgentPipeline(
   const schema = DOCUMENT_SCHEMAS[finalDocumentType];
 
   if (!isUnreadable && !ocrFailed) {
-    if (multimodalFields && Object.keys(multimodalFields).length > 0 && finalDocumentType === options.documentType) {
+    // If automatic classification selected a schema different from the initial OCR schema,
+    // ask Gemini to extract fields again using the detected document type's schema.
+    if (
+      options.fileDataUrl &&
+      multimodalFields &&
+      Object.keys(multimodalFields).length > 0 &&
+      (options.documentType === 'auto' || finalDocumentType !== options.documentType)
+    ) {
+      const schemaSpecificResult = await extractDocumentWithGemini(
+        finalDocumentType,
+        options.fileMime,
+        options.fileDataUrl
+      );
+
+      if (
+        schemaSpecificResult &&
+        schemaSpecificResult.fields &&
+        Object.keys(schemaSpecificResult.fields).length > 0
+      ) {
+        multimodalFields = schemaSpecificResult.fields;
+        if (schemaSpecificResult.rawText?.trim().length >= 15) {
+          rawText = schemaSpecificResult.rawText;
+        }
+      } else {
+        // Do not map general-document fields into an unrelated detected schema.
+        multimodalFields = null;
+      }
+    }
+
+    if (multimodalFields && Object.keys(multimodalFields).length > 0) {
       for (const def of schema.fields) {
         const item = multimodalFields[def.name];
-        const val = item ? item.value : '';
-        const conf = item ? item.confidence : (def.required ? 0.2 : 0.85);
-        const uncertain = def.required ? (!val || conf < 0.7) : false;
+        const val = item?.value?.trim() || '';
+        const conf = item ? Math.max(0, Math.min(1, item.confidence || 0)) : 0;
+        const uncertain = def.required ? (!val || conf < 0.7) : (!!val && conf < 0.7);
 
         extractedFields.push({
           field_id: `fld-${caseId}-${def.name}`,
@@ -666,10 +781,21 @@ export async function runAgentPipeline(
           field_name: def.name,
           field_label: def.label,
           field_value: val,
-          confidence: conf,
+          confidence: val ? conf : (def.required ? 0.2 : 0.8),
           is_uncertain: uncertain,
           is_edited: false
         });
+      }
+
+      // Use the heuristic parser for missing values only; do not overwrite AI-extracted values.
+      const heuristicFields = extractFieldsFromText(finalDocumentType, rawText, options.manualFields);
+      for (const field of extractedFields) {
+        const fallback = heuristicFields.find((item) => item.field_name === field.field_name);
+        if (!field.field_value && fallback?.field_value) {
+          field.field_value = fallback.field_value;
+          field.confidence = Math.min(fallback.confidence, 0.78);
+          field.is_uncertain = !!schema.fields.find((def) => def.name === field.field_name)?.required;
+        }
       }
     } else {
       extractedFields = extractFieldsFromText(finalDocumentType, rawText, options.manualFields);
