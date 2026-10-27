@@ -180,7 +180,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
         />
 
         {/* Deep navy/black frosted overlay and radial vignette to ensure pristine contrast */}
-        <div className="absolute inset-0 bg-[#030712]/75 dark:bg-[#030712]/80 backdrop-blur-[1px] pointer-events-none" />
+        <div className="absolute inset-0 bg-[#030712]/25 dark:bg-[#030712]/30 backdrop-blur-[1px] pointer-events-none" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#030712] via-transparent to-[#030712]/85 pointer-events-none" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_30%,_#030712_92%)] pointer-events-none" />
 
