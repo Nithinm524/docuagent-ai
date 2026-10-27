@@ -62,6 +62,10 @@ uniform float u_ca_strength;
 uniform float u_glow;
 uniform float u_noise_warp;
 uniform int u_pinch;
+uniform vec2 u_cursor_origins[4];
+uniform float u_cursor_start_times[4];
+uniform float u_cursor_active[4];
+uniform float u_time;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(234.34, 435.345));
@@ -77,6 +81,29 @@ void main() {
   vec2 delta = aspect_uv - aspect_origin;
   float dist = length(delta);
   vec2 dir = dist > 0.0001 ? normalize(delta) : vec2(0.0, 1.0);
+
+  // Cursor-triggered rings are independent of image transitions. Their start
+  // times are retained, so a new mouse movement never resets an expanding wave.
+  vec2 cursor_warp = vec2(0.0);
+  float cursor_glow = 0.0;
+  for (int i = 0; i < 4; i++) {
+    if (u_cursor_active[i] > 0.5) {
+      float age = max(0.0, u_time - u_cursor_start_times[i]);
+      float cursor_radius = age * 0.95;
+      vec2 cursor_origin_aspect = vec2(u_cursor_origins[i].x * aspect, u_cursor_origins[i].y);
+      vec2 cursor_delta = aspect_uv - cursor_origin_aspect;
+      float cursor_distance = length(cursor_delta);
+      vec2 cursor_direction = cursor_distance > 0.0001
+        ? normalize(cursor_delta)
+        : vec2(0.0, 1.0);
+      float ring_distance = cursor_distance - cursor_radius;
+      float ring_envelope = exp(-pow(ring_distance / 0.035, 2.0));
+      float ring_wave = sin(ring_distance * 95.0) * ring_envelope * exp(-age * 1.1);
+      cursor_warp += cursor_direction * ring_wave * 0.018;
+      cursor_glow += ring_envelope * exp(-age * 1.1);
+    }
+  }
+  uv += cursor_warp;
 
   float noise = (hash21(floor(aspect_uv * 32.0)) - 0.5) * 0.02 * u_noise_warp;
   float warped_dist = dist + noise;
@@ -122,6 +149,7 @@ void main() {
 
   float crest_glow = envelope * u_glow * sin(progress * 3.14159265);
   final_color.rgb += vec3(0.05, 0.50, 0.75) * crest_glow;
+  final_color.rgb += vec3(0.04, 0.55, 0.85) * cursor_glow * 0.18;
   gl_FragColor = final_color;
 }
 `;
@@ -205,6 +233,13 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
   const lastPointerOriginRef = useRef<[number, number]>([0.5, 0.5]);
   const hoverAnimationFrameRef = useRef<number | null>(null);
   const lastHoverRippleAtRef = useRef(0);
+  const cursorRippleEventsRef = useRef([
+    { origin: [0.5, 0.5] as [number, number], startedAt: -100, active: false },
+    { origin: [0.5, 0.5] as [number, number], startedAt: -100, active: false },
+    { origin: [0.5, 0.5] as [number, number], startedAt: -100, active: false },
+    { origin: [0.5, 0.5] as [number, number], startedAt: -100, active: false }
+  ]);
+  const nextCursorRippleSlotRef = useRef(0);
   const propsRef = useRef(props);
   const imagesReadyRef = useRef(false);
   const imagesRef = useRef(images);
@@ -258,6 +293,22 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     gl.uniform1f(gl.getUniformLocation(program, 'u_glow'), latest.glow ?? 0.73);
     gl.uniform1f(gl.getUniformLocation(program, 'u_noise_warp'), latest.noiseWarp ?? 1);
     gl.uniform1i(gl.getUniformLocation(program, 'u_pinch'), latest.pinch ? 1 : 0);
+
+    const cursorOrigins = new Float32Array(8);
+    const cursorStartTimes = new Float32Array(4);
+    const cursorActive = new Float32Array(4);
+    const nowSeconds = performance.now() / 1000;
+    cursorRippleEventsRef.current.forEach((ripple, index) => {
+      cursorOrigins[index * 2] = ripple.origin[0];
+      cursorOrigins[index * 2 + 1] = ripple.origin[1];
+      cursorStartTimes[index] = ripple.startedAt;
+      cursorActive[index] = ripple.active && nowSeconds - ripple.startedAt < 1.8 ? 1 : 0;
+      if (nowSeconds - ripple.startedAt >= 1.8) ripple.active = false;
+    });
+    gl.uniform2fv(gl.getUniformLocation(program, 'u_cursor_origins[0]'), cursorOrigins);
+    gl.uniform1fv(gl.getUniformLocation(program, 'u_cursor_start_times[0]'), cursorStartTimes);
+    gl.uniform1fv(gl.getUniformLocation(program, 'u_cursor_active[0]'), cursorActive);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_time'), nowSeconds);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }, []);
 
@@ -322,8 +373,9 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     transitionTo(currentIndexRef.current + 1, origin);
   }, [transitionTo]);
 
-  // Animate a distortion-only ripple from the current cursor position. This does
-  // not change the active image; it makes the wave respond to pointer movement.
+  // Register a cursor ripple without resetting the previous wave. The shader
+  // animates every retained ring independently, so waves continue expanding while
+  // the user keeps moving the pointer.
   const triggerHoverRipple = useCallback((origin: [number, number]) => {
     if (
       !interactive ||
@@ -334,33 +386,39 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     ) return;
 
     const now = performance.now();
-    // Throttle hover waves so moving the cursor creates distinct expanding ripples
-    // without starting hundreds of animations per second.
-    if (now - lastHoverRippleAtRef.current < 220) return;
+    if (now - lastHoverRippleAtRef.current < 75) return;
     lastHoverRippleAtRef.current = now;
 
-    if (hoverAnimationFrameRef.current !== null) {
-      window.cancelAnimationFrame(hoverAnimationFrameRef.current);
-    }
+    const slot = nextCursorRippleSlotRef.current;
+    cursorRippleEventsRef.current[slot] = {
+      origin: [origin[0], origin[1]],
+      startedAt: now / 1000,
+      active: true
+    };
+    nextCursorRippleSlotRef.current = (slot + 1) % cursorRippleEventsRef.current.length;
 
-    const imageIndex = currentIndexRef.current;
-    const startedAt = now;
-    const rippleDuration = 720;
+    // Keep drawing until every cursor ring has expanded and faded out.
+    if (hoverAnimationFrameRef.current !== null) return;
 
-    const tick = (frameTime: number) => {
-      if (transitioningRef.current || !imagesReadyRef.current) {
+    const tick = () => {
+      if (!imagesReadyRef.current || transitioningRef.current) {
         hoverAnimationFrameRef.current = null;
         return;
       }
-      const progress = Math.min(1, (frameTime - startedAt) / rippleDuration);
-      // Render the same image on both texture slots: only the expanding distortion
-      // is visible, while autoplay/click transitions continue to change scenes.
-      renderFrame(progress, imageIndex, imageIndex, origin);
-      if (progress < 1) {
+
+      const nowSeconds = performance.now() / 1000;
+      const hasActiveRipples = cursorRippleEventsRef.current.some((ripple) => {
+        if (ripple.active && nowSeconds - ripple.startedAt >= 1.8) {
+          ripple.active = false;
+        }
+        return ripple.active;
+      });
+
+      renderFrame(0, currentIndexRef.current, currentIndexRef.current, lastPointerOriginRef.current);
+      if (hasActiveRipples) {
         hoverAnimationFrameRef.current = window.requestAnimationFrame(tick);
       } else {
         hoverAnimationFrameRef.current = null;
-        renderFrame(1, imageIndex, imageIndex, origin);
       }
     };
 
