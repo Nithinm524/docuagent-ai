@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
@@ -10,21 +10,29 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/shared/validation.test.ts server/pipeline.test.ts"
+    "test": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/scanning-experience.test.ts",
+    "test:all": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/pipeline.test.ts server/scanning-experience.test.ts",
+    "scan:secrets": "node scripts/scan-secrets.js",
+    "audit": "npm audit --legacy-peer-deps"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase": "^13.1.0",
+    "framer-motion": "^14.6.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "pdf-parse": "^2.4.5",
     "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "tailwind-merge": "^3.7.0",
     "tesseract.js": "^7.0.0",
+    "three": "^0.186.1",
     "vite": "^8.3.0"
   },
   "devDependencies": {
@@ -34,6 +42,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",

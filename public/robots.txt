@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Allow: /sitemap.xml
+
+Sitemap: https://docuagent-ai.ai.studio/sitemap.xml

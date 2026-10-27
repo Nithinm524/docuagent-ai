@@ -3,19 +3,213 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Document Review & Routing Agent</title>
-    <meta name="description" content="Enterprise document review, intelligent field extraction, deterministic rule validation, and human-in-the-loop routing system." />
-    <meta property="og:title" content="AI Document Review & Routing Agent" />
-    <meta property="og:description" content="Enterprise document review, intelligent field extraction, deterministic rule validation, and human-in-the-loop routing system." />
+    <title>AI Document Review & Screening | DOCUAGENT AI</title>
+    <meta name="description" content="Review and route documents with DOCUAGENT AI. Organize identity and document screening, human review queues, and auditable decisions in one workflow." />
+    <link rel="canonical" href="https://docuagent-ai.ai.studio/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="google-site-verification" content="YOUR_UNIQUE_CODE" />
+    
+    <!-- OpenGraph Social Cards -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DOCUAGENT AI" />
+    <meta property="og:title" content="AI Document Review & Screening | DOCUAGENT AI" />
+    <meta property="og:description" content="Review and route documents with DOCUAGENT AI. Organize identity and document screening, human review queues, and auditable decisions in one workflow." />
+    <meta property="og:url" content="https://docuagent-ai.ai.studio/" />
+    <meta property="og:image" content="https://docuagent-ai.ai.studio/docuagent-logo.png" />
+    
+    <!-- Twitter Social Cards -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AI Document Review & Screening | DOCUAGENT AI" />
+    <meta name="twitter:description" content="Review and route documents with DOCUAGENT AI. Organize identity and document screening, human review queues, and auditable decisions in one workflow." />
+    <meta name="twitter:image" content="https://docuagent-ai.ai.studio/docuagent-logo.png" />
+    
+    <!-- Favicon & App Icons derived from DOCUAGENT AI Logo -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+
+    <!-- Theme and Accessibility -->
+    <meta name="theme-color" content="#030712" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Schema.org Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "@id": "https://docuagent-ai.ai.studio/#webapp",
+          "name": "DOCUAGENT AI",
+          "url": "https://docuagent-ai.ai.studio/",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "All",
+          "description": "Review and route documents with DOCUAGENT AI. Organize identity and document screening, human review queues, and auditable decisions in one workflow.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "Intelligent document classification",
+            "Multimodal OCR & structured field extraction",
+            "Deterministic cross-field validation rules",
+            "Automated queue routing & triage",
+            "Human-in-the-loop review workflow",
+            "Cryptographic audit logging & SHA-256 tamper verification"
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://docuagent-ai.ai.studio/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is AI document review?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "AI document review is an assistive technology that combines automated optical character recognition (OCR), multimodal field extraction, and deterministic validation rules to help human review teams screen, verify, and route high-volume document submissions efficiently."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "How does DOCUAGENT AI support document screening?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "DOCUAGENT AI extracts structured fields from uploaded PDFs and images, checks them against predefined schema rules (such as expiration dates, cross-document name matches, and required field completeness), and calculates confidence scores to flag potential issues for reviewer attention."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Can a reviewer inspect a case before making a decision?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. Human reviewers have complete access to inspect original documents, verify extracted field values, correct any OCR discrepancies, review rule findings with explanatory details, and enter reviewer notes before approving, rejecting, or re-routing a case."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "What information appears in the audit trail?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The immutable audit trail captures file metadata, upload timestamp, classification type, automated rule outcomes, field corrections with reviewer attribution, queue transitions, final approval or rejection decisions, and SHA-256 cryptographic hashes for tamper verification."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Which document types are supported?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "DOCUAGENT AI currently supports Passports, Driver Licenses, Bank Statements, Utility Bills, and General Business Documents in PDF, PNG, and JPEG/JPG formats up to 15MB."
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+
+    <!-- Theme initialization script to prevent FOUC -->
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('docuagent_theme');
+          var isDark = stored === 'dark' || (!stored) || (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body class="bg-slate-50 dark:bg-[#030712] text-slate-900 dark:text-slate-100 antialiased min-h-screen">
+    <div id="root">
+      <!-- Semantic crawlable HTML shell for search indexing engines before JavaScript hydration -->
+      <header>
+        <nav aria-label="Main Navigation">
+          <a href="/">DOCUAGENT AI</a>
+          <a href="/app">Open Workspace</a>
+        </nav>
+      </header>
+      <main>
+        <section>
+          <h1>AI Document Review, Screening &amp; Routing in One Workflow</h1>
+          <p>
+            Review and route documents with DOCUAGENT AI. Organize identity and document screening, human review queues, and auditable decisions in one workflow.
+          </p>
+          <div>
+            <a href="/app">Open Workspace</a>
+            <a href="#capabilities">Explore Features</a>
+          </div>
+          <p>Assistive AI decision support · Final decisions require authorized human review</p>
+        </section>
+
+        <section id="capabilities">
+          <h2>What DOCUAGENT AI Does</h2>
+          <ul>
+            <li><strong>Document Intake &amp; Classification:</strong> Ingest PDF files and raster images (PNG, JPEG) with automated format validation and schema classification.</li>
+            <li><strong>Identity &amp; Document Screening:</strong> Execute deterministic cross-field validation rules, check expiration dates, and flag identity inconsistencies.</li>
+            <li><strong>Human Reviewer Queues &amp; Routing:</strong> Automatically triage documents into General Review, Missing Information, and Priority Review queues.</li>
+            <li><strong>Audit Trails &amp; Decision History:</strong> Maintain permanent audit logs with cryptographic SHA-256 verification hashes.</li>
+          </ul>
+        </section>
+
+        <section id="workflow">
+          <h2>How It Works</h2>
+          <ol>
+            <li><strong>Submit Intake Document:</strong> Upload a supported credential or statement with affirmative consent.</li>
+            <li><strong>Screen &amp; Inspect Findings:</strong> Review extracted schema fields with confidence scores and automated rule checks.</li>
+            <li><strong>Human Review &amp; Auditable Sign-Off:</strong> Authorized specialists verify cases, correct fields, and record immutable review decisions.</li>
+          </ol>
+        </section>
+
+        <section id="use-cases">
+          <h2>Supported Document Schemas</h2>
+          <ul>
+            <li><strong>Passports:</strong> Identity screening, expiration enforcement, and name consistency.</li>
+            <li><strong>Driver Licenses:</strong> Domestic driver credentials, issue and expiry validation, age and license number verification.</li>
+            <li><strong>Bank Statements:</strong> Account holder verification and statement recency within 90 days.</li>
+            <li><strong>Utility Bills:</strong> Address verification, service provider validation, and recent utility records.</li>
+            <li><strong>General Documents:</strong> Structured ingestion for agreements, contracts, and unclassified records.</li>
+          </ul>
+        </section>
+
+        <section id="trust">
+          <h2>Trust, Privacy, and Human Oversight</h2>
+          <p>
+            DOCUAGENT AI delivers assistive decision support with authorized human oversight, strict 90-day local retention lifecycles, role-based access control, affirmative consent disclosures, and cryptographic auditability.
+          </p>
+        </section>
+
+        <section id="faq">
+          <h2>Frequently Asked Questions</h2>
+          <dl>
+            <dt>What is AI document review?</dt>
+            <dd>AI document review is an assistive technology that combines automated optical character recognition (OCR), multimodal field extraction, and deterministic validation rules to help human review teams screen, verify, and route high-volume document submissions efficiently.</dd>
+            <dt>How does DOCUAGENT AI support document screening?</dt>
+            <dd>DOCUAGENT AI extracts structured fields from uploaded PDFs and images, checks them against predefined schema rules (such as expiration dates, cross-document name matches, and required field completeness), and calculates confidence scores to flag potential issues for reviewer attention.</dd>
+            <dt>Can a reviewer inspect a case before making a decision?</dt>
+            <dd>Yes. Human reviewers have complete access to inspect original documents, verify extracted field values, correct any OCR discrepancies, review rule findings with explanatory details, and enter reviewer notes before approving, rejecting, or re-routing a case.</dd>
+            <dt>What information appears in the audit trail?</dt>
+            <dd>The immutable audit trail captures file metadata, upload timestamp, classification type, automated rule outcomes, field corrections with reviewer attribution, queue transitions, final approval or rejection decisions, and SHA-256 cryptographic hashes for tamper verification.</dd>
+            <dt>Which document types are supported?</dt>
+            <dd>DOCUAGENT AI currently supports Passports, Driver Licenses, Bank Statements, Utility Bills, and General Business Documents in PDF, PNG, and JPEG/JPG formats up to 15MB.</dd>
+          </dl>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -35,6 +35,7 @@ import { SYNTHETIC_SCENARIOS } from '../src/shared/samples.ts';
 import { apiCache } from './cache.ts';
 import { log } from './logger.ts';
 import { AppError } from './errors.ts';
+import { cryptoService } from './crypto.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const DATA_FILE = path.join(DATA_DIR, 'cases_store.json');
@@ -50,8 +51,18 @@ export interface CaseFilterOptions {
   queue?: string;
   docType?: string;
   search?: string;
+  reviewer?: string;
+  documentId?: string;
+  startDate?: string;
+  endDate?: string;
+  findingCategory?: string;
+  findingSeverity?: string;
+  extractedFieldValue?: string;
   page?: number;
   limit?: number;
+  tenantId?: string;
+  userId?: string;
+  userRole?: string;
 }
 
 /**
@@ -89,10 +100,13 @@ class CaseStore implements ICaseRepository {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         const parsed: StoreData = JSON.parse(raw);
         if (parsed.cases && Array.isArray(parsed.cases) && parsed.cases.length > 0) {
-          // Ensure version numbers exist on all records
+          // Ensure version numbers exist on all records and decrypt sensitive payload fields
           this.inMemoryCache = parsed.cases.map((c) => ({
             ...c,
-            version: c.version || 1
+            version: c.version || 1,
+            raw_text: c.raw_text ? cryptoService.decrypt(c.raw_text) : c.raw_text,
+            file_data_url: c.file_data_url ? cryptoService.decrypt(c.file_data_url) : c.file_data_url,
+            cross_reference_text: c.cross_reference_text ? cryptoService.decrypt(c.cross_reference_text) : c.cross_reference_text
           }));
           this.rebuildIndex();
           this.isPersistedToFile = true;
@@ -268,9 +282,18 @@ class CaseStore implements ICaseRepository {
       if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
       }
+      // Encrypt sensitive fields (raw_text, file_data_url, cross_reference_text) before writing to disk
+      const encryptedCases = this.inMemoryCache.map((c) => ({
+        ...c,
+        raw_text: c.raw_text ? cryptoService.encrypt(c.raw_text) : c.raw_text,
+        file_data_url: c.file_data_url ? cryptoService.encrypt(c.file_data_url) : c.file_data_url,
+        cross_reference_text: c.cross_reference_text ? cryptoService.encrypt(c.cross_reference_text) : c.cross_reference_text,
+        is_encrypted: true
+      }));
+
       const data: StoreData = {
         version: 1,
-        cases: this.inMemoryCache,
+        cases: encryptedCases,
         last_updated: new Date().toISOString()
       };
 
@@ -294,15 +317,28 @@ class CaseStore implements ICaseRepository {
   }
 
   public getById(id: string): CaseRecord | undefined {
-    return this.idIndex.get(id);
+    return this.inMemoryCache.find((c) => c.case_id === id) || this.idIndex.get(id);
   }
 
   /**
    * Bounded server-side pagination with filtering
    */
   public getPaginated(options: CaseFilterOptions): PaginatedResult<CaseRecord> {
+    const {
+      status,
+      queue,
+      docType,
+      search,
+      reviewer,
+      documentId,
+      startDate,
+      endDate,
+      findingCategory,
+      findingSeverity,
+      extractedFieldValue
+    } = options;
+
     let cases = this.getAll();
-    const { status, queue, docType, search } = options;
 
     if (status && status !== 'all') {
       cases = cases.filter((c) => c.status.toLowerCase() === status.toLowerCase());
@@ -316,6 +352,83 @@ class CaseStore implements ICaseRepository {
       cases = cases.filter((c) => c.document_type.toLowerCase() === docType.toLowerCase());
     }
 
+    if (reviewer && reviewer !== 'all') {
+      const rLower = reviewer.toLowerCase();
+      cases = cases.filter(
+        (c) =>
+          (c.assigned_reviewer && c.assigned_reviewer.toLowerCase().includes(rLower)) ||
+          (c.reviewer_decision?.reviewed_by && c.reviewer_decision.reviewed_by.toLowerCase().includes(rLower))
+      );
+    }
+
+    if (documentId && documentId.trim()) {
+      const dLower = documentId.toLowerCase().trim();
+      cases = cases.filter(
+        (c) => c.case_number.toLowerCase().includes(dLower) || c.case_id.toLowerCase().includes(dLower)
+      );
+    }
+
+    if (startDate) {
+      const startMs = new Date(startDate).getTime();
+      if (!isNaN(startMs)) {
+        cases = cases.filter((c) => new Date(c.created_at).getTime() >= startMs);
+      }
+    }
+
+    if (endDate) {
+      const endMs = new Date(endDate).getTime();
+      if (!isNaN(endMs)) {
+        const adjustedEnd = endDate.length <= 10 ? endMs + 86400000 : endMs;
+        cases = cases.filter((c) => new Date(c.created_at).getTime() <= adjustedEnd);
+      }
+    }
+
+    if (findingCategory && findingCategory !== 'all') {
+      const fCatLower = findingCategory.toLowerCase();
+      cases = cases.filter((c) =>
+        c.validation_findings &&
+        c.validation_findings.some((f) => {
+          const cat = (f.category || '').toLowerCase();
+          const check = (f.check_name || '').toLowerCase();
+          return (
+            cat === fCatLower ||
+            cat.includes(fCatLower) ||
+            fCatLower.includes(cat) ||
+            check.includes(fCatLower)
+          );
+        })
+      );
+    }
+
+    if (findingSeverity && findingSeverity !== 'all') {
+      const fSevLower = findingSeverity.toLowerCase();
+      cases = cases.filter((c) =>
+        c.validation_findings &&
+        c.validation_findings.some((f) => {
+          const sev = (f.severity || '').toLowerCase();
+          return (
+            sev === fSevLower ||
+            sev.includes(fSevLower) ||
+            fSevLower.includes(sev) ||
+            (fSevLower === 'critical' && sev === 'high') ||
+            (fSevLower === 'high' && sev === 'critical')
+          );
+        })
+      );
+    }
+
+    if (extractedFieldValue && extractedFieldValue.trim()) {
+      const valLower = extractedFieldValue.toLowerCase().trim();
+      cases = cases.filter((c) =>
+        c.extracted_fields &&
+        c.extracted_fields.some(
+          (f) =>
+            (f.field_value && f.field_value.toLowerCase().includes(valLower)) ||
+            (f.reviewed_value && f.reviewed_value.toLowerCase().includes(valLower))
+        )
+      );
+    }
+
     if (search && search.trim()) {
       const q = search.toLowerCase().trim();
       cases = cases.filter(
@@ -323,12 +436,26 @@ class CaseStore implements ICaseRepository {
           c.case_number.toLowerCase().includes(q) ||
           c.case_id.toLowerCase().includes(q) ||
           c.file_name.toLowerCase().includes(q) ||
-          c.extracted_fields.some(
-            (f) =>
-              f.field_value.toLowerCase().includes(q) ||
-              (f.reviewed_value && f.reviewed_value.toLowerCase().includes(q))
-          )
+          (c.assigned_reviewer && c.assigned_reviewer.toLowerCase().includes(q)) ||
+          (c.extracted_fields &&
+            c.extracted_fields.some(
+              (f) =>
+                f.field_value.toLowerCase().includes(q) ||
+                (f.reviewed_value && f.reviewed_value.toLowerCase().includes(q))
+            ))
       );
+    }
+
+    // Tenant Scoping (RLS equivalent in JSON storage)
+    if (options.tenantId && options.tenantId !== 'all') {
+      cases = cases.filter(
+        (c) => !c.tenant_id || c.tenant_id === options.tenantId || c.tenant_id === 'tenant-enterprise-primary'
+      );
+    }
+
+    // Role-based applicant ownership filtering (IDOR defense)
+    if (options.userRole === 'applicant' && options.userId) {
+      cases = cases.filter((c) => c.created_by === options.userId);
     }
 
     const total = cases.length;
@@ -352,9 +479,36 @@ class CaseStore implements ICaseRepository {
     };
   }
 
+  public checkRecordAccess(
+    caseRecord: CaseRecord,
+    user?: { userId?: string; role?: string; tenantId?: string }
+  ): boolean {
+    if (!user) return true; // public demo sandbox access
+    if (user.role === 'admin' || user.role === 'reviewer' || user.role === 'viewer') {
+      if (
+        caseRecord.tenant_id &&
+        user.tenantId &&
+        caseRecord.tenant_id !== user.tenantId &&
+        user.tenantId !== 'tenant-enterprise-primary'
+      ) {
+        throw new AppError('Access denied: cross-tenant access forbidden.', 'IDOR_FORBIDDEN', 403);
+      }
+      return true;
+    }
+    if (user.role === 'applicant') {
+      if (caseRecord.created_by && user.userId && caseRecord.created_by !== user.userId) {
+        throw new AppError('Access denied: you may only access your own submitted cases.', 'IDOR_FORBIDDEN', 403);
+      }
+      return true;
+    }
+    return true;
+  }
+
   public add(caseRecord: CaseRecord): CaseRecord {
     caseRecord.version = 1;
+    this.inMemoryCache = this.inMemoryCache.filter((c) => c.case_id !== caseRecord.case_id);
     this.inMemoryCache.unshift(caseRecord);
+    this.idIndex.set(caseRecord.case_id, caseRecord);
     this.persistSync();
     return caseRecord;
   }
@@ -413,6 +567,188 @@ class CaseStore implements ICaseRepository {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Data Minimisation & Erasure Workflow:
+   * Strips original uploaded file payload, raw text, and masks PII field values,
+   * retaining an immutable audit trail for legal compliance without storing personal data indefinitely.
+   */
+  public purgeCaseData(id: string, operator = 'System Admin', reason = 'Data Minimisation & Retention Expiry'): CaseRecord {
+    return this.update(id, (record) => {
+      record.file_data_url = undefined;
+      record.raw_text = undefined;
+      record.cross_reference_text = undefined;
+      record.is_purged = true;
+      record.purged_at = new Date().toISOString();
+      record.purge_reason = reason;
+
+      // Mask sensitive extracted field values
+      record.extracted_fields = record.extracted_fields.map((f) => ({
+        ...f,
+        field_value: '[PURGED_UNDER_DATA_MINIMISATION]',
+        reviewed_value: f.reviewed_value ? '[PURGED]' : undefined
+      }));
+
+      if (!Array.isArray(record.audit_events)) {
+        record.audit_events = [];
+      }
+
+      record.audit_events.push({
+        event_id: `evt-purge-${id}-${Date.now()}`,
+        case_id: id,
+        event_type: 'DATA_PURGED_MINIMISED',
+        actor: operator as any,
+        summary: `Document file and personal identifiers permanently expunged. Reason: ${reason}`,
+        details: 'Raw file data, full text stream, and extracted PII cleared under data minimisation policy.',
+        created_at: new Date().toISOString()
+      });
+
+      return record;
+    });
+  }
+
+  /**
+   * Consent Withdrawal Workflow (DPDP Section 6(4)):
+   * Marks consent as withdrawn, records audit evidence, and minimizes personal data.
+   */
+  public withdrawConsent(id: string, reason = 'Data Principal requested consent withdrawal'): CaseRecord {
+    return this.update(id, (record) => {
+      const now = new Date().toISOString();
+      if (!record.consent_record) {
+        record.consent_record = {
+          consent_id: `consent-${id}`,
+          notice_version: '2026.1',
+          timestamp: record.created_at,
+          purpose: 'document_validation_and_review',
+          legal_basis: 'consent',
+          affirmative_action: true,
+          user_declaration: true,
+          withdrawn: true,
+          withdrawn_at: now,
+          withdrawal_reason: reason
+        };
+      } else {
+        record.consent_record.withdrawn = true;
+        record.consent_record.withdrawn_at = now;
+        record.consent_record.withdrawal_reason = reason;
+      }
+
+      record.audit_events.push({
+        event_id: `evt-withdraw-${id}-${Date.now()}`,
+        case_id: id,
+        event_type: 'CONSENT_WITHDRAWN',
+        actor: 'Data Principal',
+        summary: `Consent withdrawn by Data Principal. Reason: ${reason}`,
+        details: 'Consent withdrawn under DPDP Act Section 6(4). Initiating data minimization.',
+        created_at: now
+      });
+
+      // Erase raw document payload to respect withdrawal
+      record.file_data_url = undefined;
+      record.raw_text = undefined;
+      record.is_purged = true;
+      record.purged_at = now;
+
+      return record;
+    });
+  }
+
+  /**
+   * Purges all case records and personal identifiers associated with a specific user account.
+   */
+  public purgeUserData(userId: string): { purgedCases: number } {
+    let count = 0;
+    for (const c of this.inMemoryCache) {
+      if (c.created_by === userId || (c as any).user_id === userId) {
+        this.purgeCaseData(c.case_id, 'User Account Termination', 'Data erasure pursuant to user account deletion');
+        count++;
+      }
+    }
+    return { purgedCases: count };
+  }
+
+  /**
+   * Automated Data Retention Cleanup Job:
+   * Identifies cases exceeding the 90-day retention threshold or cases with withdrawn consent
+   * past the mandatory processing grace period, expunging raw files and personal identifiers.
+   */
+  public runRetentionCleanup(retentionDays = 90): {
+    purged_cases: number;
+    total_cases: number;
+    retention_policy_days: number;
+    timestamp: string;
+  } {
+    const now = Date.now();
+    const thresholdMs = now - retentionDays * 24 * 60 * 60 * 1000;
+    let purgedCount = 0;
+
+    for (const c of this.inMemoryCache) {
+      if (c.is_purged) continue;
+      const createdTime = new Date(c.created_at).getTime();
+      const isExpired = createdTime < thresholdMs;
+      const isWithdrawnExpired =
+        Boolean(c.consent_record?.withdrawn &&
+        c.consent_record.withdrawn_at &&
+        now - new Date(c.consent_record.withdrawn_at).getTime() > 24 * 60 * 60 * 1000);
+
+      if (isExpired || isWithdrawnExpired) {
+        const reason = isExpired
+          ? `Retention policy cycle reached (${retentionDays}-day retention threshold)`
+          : 'Consent withdrawal retention period elapsed';
+        this.purgeCaseData(c.case_id, 'System Automated Retention Job', reason);
+        purgedCount++;
+      }
+    }
+
+    log({
+      level: 'INFO',
+      operation: 'RETENTION_CLEANUP_JOB',
+      message: `Automated retention cleanup executed. Evaluated ${this.inMemoryCache.length} cases; purged ${purgedCount} expired records.`
+    });
+
+    return {
+      purged_cases: purgedCount,
+      total_cases: this.inMemoryCache.length,
+      retention_policy_days: retentionDays,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  // In-memory / file-persisted DPDP requests
+  private dpdpRequests: import('../src/shared/types.ts').DataPrincipalRequest[] = [];
+
+  public addDataPrincipalRequest(
+    data: Omit<import('../src/shared/types.ts').DataPrincipalRequest, 'request_id' | 'created_at' | 'status'>
+  ): import('../src/shared/types.ts').DataPrincipalRequest {
+    const req: import('../src/shared/types.ts').DataPrincipalRequest = {
+      request_id: `dpdp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      ...data,
+      status: 'pending',
+      created_at: new Date().toISOString()
+    };
+    this.dpdpRequests.unshift(req);
+    return req;
+  }
+
+  public getDataPrincipalRequests(): import('../src/shared/types.ts').DataPrincipalRequest[] {
+    return [...this.dpdpRequests];
+  }
+
+  public updateDataPrincipalRequest(
+    id: string,
+    status: 'pending' | 'in_review' | 'fulfilled' | 'rejected',
+    notes?: string
+  ) {
+    const found = this.dpdpRequests.find((r) => r.request_id === id);
+    if (found) {
+      found.status = status;
+      if (notes) found.resolution_notes = notes;
+      if (status === 'fulfilled' || status === 'rejected') {
+        found.resolved_at = new Date().toISOString();
+      }
+    }
+    return found;
   }
 
   public reset(): void {

@@ -15,6 +15,7 @@ export interface StructuredLog {
   message: string;
   errorSummary?: string;
   clientIp?: string;
+  targetResource?: string;
   details?: Record<string, any>;
 }
 
@@ -23,7 +24,7 @@ const LOG_BUFFER_SIZE = 150;
 const logBuffer: StructuredLog[] = [];
 
 /**
- * Redacts secrets, API keys, tokens, and sensitive base64 payloads from logs.
+ * Redacts secrets, API keys, tokens, PII, financial identifiers, and document payloads from logs.
  */
 export function sanitizeLogData(input: any): any {
   if (input === null || input === undefined) return input;
@@ -32,11 +33,19 @@ export function sanitizeLogData(input: any): any {
     if (input.startsWith('data:') && input.includes(';base64,')) {
       return `[REDACTED_BASE64_DATA length=${input.length}]`;
     }
-    // Redact API keys / tokens
+    // Redact API keys / tokens / credentials
     let sanitized = input
       .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_GEMINI_KEY]')
       .replace(/(Bearer\s+)[A-Za-z0-9_\-\.]+/gi, '$1[REDACTED_TOKEN]')
-      .replace(/("?(?:apiKey|password|secret|key)"?\s*[:=]\s*"?[^",\s]+"?)/gi, '[REDACTED_CREDENTIAL]');
+      .replace(/("?(?:apiKey|password|secret|key)"?\s*[:=]\s*"?[^",\s]+"?)/gi, '[REDACTED_CREDENTIAL]')
+      // Redact SSN: 000-00-0000
+      .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[REDACTED_SSN]')
+      // Redact Aadhaar: 0000 0000 0000
+      .replace(/\b\d{4}\s\d{4}\s\d{4}\b/g, '[REDACTED_AADHAAR]')
+      // Redact PAN: 5 letters, 4 digits, 1 letter
+      .replace(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/g, '[REDACTED_PAN]')
+      // Redact Card/Bank 13-19 digit strings
+      .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[REDACTED_ACCOUNT_NUM]');
     return sanitized;
   }
   if (Array.isArray(input)) {
@@ -54,7 +63,18 @@ export function sanitizeLogData(input: any): any {
         lower.includes('authorization')
       ) {
         sanitizedObj[key] = '[REDACTED]';
-      } else if (lower.includes('filedataurl') || lower.includes('rawtext')) {
+      } else if (
+        lower.includes('passport') ||
+        lower.includes('ssn') ||
+        lower.includes('aadhaar') ||
+        lower.includes('pan_number') ||
+        lower.includes('account_number') ||
+        lower.includes('tax_id') ||
+        lower.includes('id_number') ||
+        lower.includes('document_number')
+      ) {
+        sanitizedObj[key] = '[REDACTED_PII_IDENTIFIER]';
+      } else if (lower.includes('filedataurl') || lower.includes('rawtext') || lower.includes('raw_text')) {
         sanitizedObj[key] = typeof val === 'string' ? `[TEXT_DATA length=${val.length}]` : '[REDACTED]';
       } else {
         sanitizedObj[key] = sanitizeLogData(val);

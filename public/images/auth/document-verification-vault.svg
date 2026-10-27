@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1200" width="1600" height="1200">
+  <defs>
+    <linearGradient id="vaultBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#030712"/>
+      <stop offset="60%" stop-color="#0a192f"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="cardGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="cardGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0f766e" stop-opacity="0.05"/>
+    </linearGradient>
+    <radialGradient id="centerBurst" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.3"/>
+      <stop offset="60%" stop-color="#0891b2" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#030712" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="vaultGlow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1600" height="1200" fill="url(#vaultBg)"/>
+  <rect width="1600" height="1200" fill="url(#centerBurst)"/>
+
+  <!-- Scanning Isometric Document Planes -->
+  <g transform="translate(800, 560)" filter="url(#vaultGlow)">
+    <!-- Bottom Document Plane -->
+    <polygon points="-380,80 0,260 380,80 0,-100" fill="url(#cardGrad1)" stroke="#38bdf8" stroke-width="2" stroke-opacity="0.4"/>
+    
+    <!-- Middle Document Plane -->
+    <polygon points="-320,-20 0,160 320,-20 0,-200" fill="url(#cardGrad2)" stroke="#2dd4bf" stroke-width="2" stroke-opacity="0.5"/>
+    
+    <!-- Top Focused Inspection Card -->
+    <polygon points="-260,-120 0,60 260,-120 0,-300" fill="#042f2e" fill-opacity="0.6" stroke="#22d3ee" stroke-width="2.5" stroke-opacity="0.8"/>
+    
+    <!-- Internal Document Data Strata on Top Card -->
+    <line x1="-180" y1="-140" x2="-20" y2="-220" stroke="#38bdf8" stroke-width="3" stroke-opacity="0.7"/>
+    <line x1="-140" y1="-110" x2="40" y2="-200" stroke="#38bdf8" stroke-width="3" stroke-opacity="0.7"/>
+    <line x1="-100" y1="-80" x2="100" y2="-180" stroke="#38bdf8" stroke-width="3" stroke-opacity="0.7"/>
+    <line x1="-60" y1="-50" x2="140" y2="-150" stroke="#2dd4bf" stroke-width="3" stroke-opacity="0.8"/>
+
+    <!-- Verification Laser Scanline -->
+    <line x1="-270" y1="-60" x2="270" y2="-60" stroke="#22d3ee" stroke-width="4" stroke-opacity="0.9" filter="url(#vaultGlow)"/>
+    <ellipse cx="0" cy="-60" rx="270" ry="24" fill="none" stroke="#67e8f9" stroke-width="1.5" stroke-dasharray="10 6"/>
+  </g>
+
+  <!-- Watermark Circuitry Traces -->
+  <g stroke="#0284c7" stroke-width="1.5" stroke-opacity="0.25" fill="none">
+    <path d="M 150 200 H 350 L 450 300 V 500"/>
+    <circle cx="150" cy="200" r="5" fill="#38bdf8"/>
+    <circle cx="450" cy="500" r="5" fill="#38bdf8"/>
+
+    <path d="M 1450 200 H 1250 L 1150 300 V 500"/>
+    <circle cx="1450" cy="200" r="5" fill="#2dd4bf"/>
+    <circle cx="1150" cy="500" r="5" fill="#2dd4bf"/>
+
+    <path d="M 300 1000 H 500 L 600 900"/>
+    <circle cx="300" cy="1000" r="5" fill="#38bdf8"/>
+
+    <path d="M 1300 1000 H 1100 L 1000 900"/>
+    <circle cx="1300" cy="1000" r="5" fill="#2dd4bf"/>
+  </g>
+
+  <!-- Technical Overlay Labels -->
+  <text x="180" y="240" fill="#38bdf8" font-family="monospace" font-size="14" opacity="0.8">VAULT::CRYPTOGRAPHIC_ATTESTATION</text>
+  <text x="180" y="265" fill="#94a3b8" font-family="monospace" font-size="12" opacity="0.6">IMMUTABLE_HASH::SHA256_ACTIVE</text>
+  <text x="1080" y="240" fill="#2dd4bf" font-family="monospace" font-size="14" opacity="0.8">INGESTION::OCR_EXTRACTION_HIGH_RES</text>
+  <text x="1080" y="265" fill="#94a3b8" font-family="monospace" font-size="12" opacity="0.6">VERIFY_LEVEL::ENTERPRISE_SECURE</text>
+</svg>

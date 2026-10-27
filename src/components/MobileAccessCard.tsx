@@ -111,18 +111,18 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
 
   return (
     <div
-      className={`rounded-xl border border-slate-800/80 bg-[#0B1120] p-4 transition-all ${className}`}
+      className={`rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0B1120] p-4 transition-all ${className}`}
     >
       {/* Header with expand/collapse */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2.5">
-          <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+          <div className="w-7 h-7 rounded-lg bg-cyan-50 dark:bg-cyan-500/10 border border-cyan-200 dark:border-cyan-500/20 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
             <Smartphone className="w-4 h-4 stroke-[2]" />
           </div>
           <div>
-            <h3 className="text-xs font-semibold text-white tracking-tight flex items-center space-x-2">
+            <h3 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight flex items-center space-x-2">
               <span>Open on Mobile</span>
-              <span className="text-[10px] font-normal text-slate-400">
+              <span className="text-[10px] font-normal text-slate-500 dark:text-slate-400">
                 · Scan to test mobile review
               </span>
             </h3>
@@ -132,7 +132,7 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
         <div className="flex items-center space-x-1.5">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1 rounded text-slate-400 hover:text-slate-200 transition-colors"
+            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             aria-label={isExpanded ? 'Collapse mobile access' : 'Expand mobile access'}
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -142,7 +142,7 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
 
       {/* Expanded QR Panel */}
       {isExpanded && (
-        <div className="mt-4 pt-3.5 border-t border-slate-800/80">
+        <div className="mt-4 pt-3.5 border-t border-slate-200 dark:border-slate-800/80">
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
             {/* White Background High-Contrast QR Code Container */}
             <div className="shrink-0 flex flex-col items-center">
@@ -159,8 +159,8 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
                   </div>
                 )}
               </div>
-              <span className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 Camera scan enabled
               </span>
             </div>
@@ -168,23 +168,23 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
             {/* Details & Action Controls */}
             <div className="flex-1 min-w-0 space-y-3 text-center sm:text-left">
               <div>
-                <p className="text-xs text-slate-300 leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   Scan with your smartphone camera to open DOCUAGENT on mobile. The responsive interface adapts seamlessly for mobile document intake, OCR verification, and reviewer queue triage.
                 </p>
               </div>
 
               {/* URL Display */}
               <div>
-                <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
                   Published Application Link
                 </label>
-                <div className="flex items-center space-x-2 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 text-xs font-mono text-cyan-300/90 break-all select-all">
+                <div className="flex items-center space-x-2 bg-slate-50 dark:bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-mono text-cyan-700 dark:text-cyan-300/90 break-all select-all">
                   <span className="truncate">{targetUrl}</span>
                   <a
                     href={targetUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-slate-400 hover:text-cyan-300 shrink-0 ml-auto"
+                    className="text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-300 shrink-0 ml-auto"
                     title="Open in new window"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -197,16 +197,16 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
                 <button
                   type="button"
                   onClick={handleCopyLink}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700/80 flex items-center space-x-1.5 transition-colors cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium border border-slate-300 dark:border-slate-700/80 flex items-center space-x-1.5 transition-colors cursor-pointer"
                 >
                   {copied ? (
                     <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-300">Link Copied</span>
+                      <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span className="text-emerald-600 dark:text-emerald-300">Link Copied</span>
                     </>
                   ) : (
                     <>
-                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                      <Copy className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                       <span>Copy Link</span>
                     </>
                   )}
@@ -216,9 +216,9 @@ export const MobileAccessCard: React.FC<MobileAccessCardProps> = ({
                   <button
                     type="button"
                     onClick={handleDownloadQR}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700/80 flex items-center space-x-1.5 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-medium border border-slate-300 dark:border-slate-700/80 flex items-center space-x-1.5 transition-colors cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5 text-slate-400" />
+                    <Download className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                     <span>Download QR Code</span>
                   </button>
                 )}

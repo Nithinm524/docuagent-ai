@@ -114,6 +114,11 @@ export class IdempotencyStore {
     }
   }
 
+  public remove(key: string): void {
+    this.cache.delete(key);
+    this.persist();
+  }
+
   public clear(): void {
     this.cache.clear();
     this.persist();

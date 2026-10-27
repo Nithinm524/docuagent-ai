@@ -196,7 +196,7 @@ Governing Law: State of Delaware. All terms binding upon signature.`,
     expected_status: 'Priority Review',
     expected_queue: 'Priority Review',
     badge: 'Image (PNG/OCR)',
-    badge_color: 'violet',
+    badge_color: 'indigo',
     mock_text: `MASSACHUSETTS DRIVER LICENSE
 LIC NO: S99104829
 NAME: ELENA ROSTOVA

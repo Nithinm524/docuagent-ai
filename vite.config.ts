@@ -8,7 +8,13 @@ function expressApiPlugin(): Plugin {
     name: 'express-api-plugin',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (req.url && (req.url.startsWith('/api') || req.url.startsWith('/api/'))) {
+        if (
+          req.url &&
+          (req.url.startsWith('/api') ||
+            req.url.startsWith('/api/') ||
+            req.url === '/robots.txt' ||
+            req.url === '/sitemap.xml')
+        ) {
           try {
             const { default: apiApp } = await import('./server/api.ts');
             return (apiApp as any)(req, res, next);
@@ -28,10 +34,12 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss(), expressApiPlugin()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, './src'),
       },
     },
     server: {
+      allowedHosts: true,
+      cors: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

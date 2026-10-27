@@ -26,6 +26,8 @@ export type ReviewerQueue =
   | 'Missing Information'
   | 'Priority Review';
 
+export type UserRole = 'admin' | 'reviewer' | 'viewer' | 'applicant';
+
 export type FindingCategory =
   | 'missing_information'
   | 'format_error'
@@ -76,6 +78,32 @@ export interface ReviewAction {
   created_at: string;
 }
 
+export interface ConsentRecord {
+  consent_id: string;
+  notice_version: string;
+  timestamp: string;
+  purpose: string;
+  legal_basis: 'consent' | 'legitimate_uses' | 'legal_obligation' | 'operator_assessment_pending';
+  affirmative_action: boolean;
+  user_declaration: boolean;
+  withdrawn: boolean;
+  withdrawn_at?: string;
+  withdrawal_reason?: string;
+}
+
+export interface DataPrincipalRequest {
+  request_id: string;
+  request_type: 'access' | 'correction' | 'erasure' | 'grievance' | 'nomination';
+  case_id?: string;
+  requester_name: string;
+  requester_email: string;
+  details: string;
+  status: 'pending' | 'in_review' | 'fulfilled' | 'rejected';
+  created_at: string;
+  resolved_at?: string;
+  resolution_notes?: string;
+}
+
 export interface AuditEvent {
   event_id: string;
   case_id: string;
@@ -93,8 +121,18 @@ export interface AuditEvent {
     | 'QUEUE_TRANSFERRED'
     | 'REVIEW_COMPLETED'
     | 'AGENT_RE_EVALUATED'
-    | 'DOCUMENT_TYPE_DETECTED';
-  actor: 'AI Agent' | 'Human Reviewer' | 'System';
+    | 'DOCUMENT_TYPE_DETECTED'
+    | 'CONSENT_RECORDED'
+    | 'CONSENT_WITHDRAWN'
+    | 'DATA_ERASURE_REQUESTED'
+    | 'DOCUMENT_DELETED'
+    | 'DATA_PURGED_MINIMISED'
+    | 'AUTHENTICATION_SUCCESS'
+    | 'AUTHENTICATION_FAILURE'
+    | 'ACCESS_DENIED'
+    | 'RATE_LIMIT_TRIGGERED'
+    | 'SECURITY_ALERT';
+  actor: 'AI Agent' | 'Human Reviewer' | 'System' | 'Data Principal' | 'Security Engine';
   summary: string;
   details?: string;
   created_at: string;
@@ -130,6 +168,12 @@ export interface CaseRecord {
   status: CaseStatus;
   assigned_queue: ReviewerQueue;
   assigned_reviewer?: string;
+  reviewer_decision?: {
+    action: string;
+    reviewed_by: string;
+    reviewed_at: string;
+    notes?: string;
+  };
   routing_reason: string;
   executive_summary?: string;
   processing_error?: string;
@@ -138,6 +182,14 @@ export interface CaseRecord {
   review_actions: ReviewAction[];
   audit_events: AuditEvent[];
   agent_trace: AgentStepTrace[];
+  consent_record?: ConsentRecord;
+  retention_until?: string;
+  is_purged?: boolean;
+  purged_at?: string;
+  purge_reason?: string;
+  tenant_id?: string;
+  created_by?: string;
+  is_encrypted?: boolean;
 }
 
 export interface PaginationMeta {

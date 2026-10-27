@@ -1,11 +1,54 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, .dark, .dark *));
+
+:root {
+  color-scheme: light;
+  --bg-page: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-subtle: #f1f5f9;
+  --bg-surface-elevated: #ffffff;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --nav-bg: rgba(255, 255, 255, 0.95);
+  --table-header-bg: #f8fafc;
+  --table-row-hover: #f1f5f9;
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --accent-cyan: #0284c7;
+  --accent-cyan-subtle: #e0f2fe;
+}
+
+.dark, [data-theme="dark"] {
+  color-scheme: dark;
+  --bg-page: #070b14;
+  --bg-surface: #0b1120;
+  --bg-surface-subtle: #0f172a;
+  --bg-surface-elevated: #131d33;
+  --border-subtle: rgba(30, 41, 59, 0.8);
+  --border-strong: rgba(51, 65, 85, 0.8);
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --nav-bg: rgba(9, 14, 26, 0.95);
+  --table-header-bg: rgba(2, 6, 23, 0.8);
+  --table-row-hover: rgba(30, 41, 59, 0.3);
+  --input-bg: #020617;
+  --input-border: #1e293b;
+  --accent-cyan: #22d3ee;
+  --accent-cyan-subtle: rgba(34, 211, 238, 0.1);
+}
+
 @layer base {
   body {
-    background-color: #090d16;
-    color: #f1f5f9;
+    background-color: var(--bg-page);
+    color: var(--text-primary);
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   code, pre, .font-mono {
@@ -13,20 +56,52 @@
   }
 }
 
-/* Custom scrollbars for clean enterprise look */
+/* Custom theme utilities */
+.bg-page {
+  background-color: var(--bg-page);
+}
+.bg-surface {
+  background-color: var(--bg-surface);
+}
+.bg-surface-subtle {
+  background-color: var(--bg-surface-subtle);
+}
+.bg-surface-elevated {
+  background-color: var(--bg-surface-elevated);
+}
+.border-subtle {
+  border-color: var(--border-subtle);
+}
+.border-strong {
+  border-color: var(--border-strong);
+}
+.text-primary {
+  color: var(--text-primary);
+}
+.text-secondary {
+  color: var(--text-secondary);
+}
+.text-muted {
+  color: var(--text-muted);
+}
+.nav-bg {
+  background-color: var(--nav-bg);
+}
+
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b1120;
+  background: var(--bg-surface);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: var(--border-strong);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: var(--text-muted);
 }
 
 @keyframes pulse-subtle {
@@ -36,6 +111,38 @@
 
 .animate-pulse-subtle {
   animation: pulse-subtle 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Clean Document Inspection Scanner Animations */
+@keyframes scan-beam-vertical {
+  0% {
+    top: 4%;
+    opacity: 0.5;
+  }
+  50% {
+    top: 92%;
+    opacity: 0.9;
+  }
+  100% {
+    top: 4%;
+    opacity: 0.5;
+  }
+}
+
+.animate-scan-beam {
+  animation: scan-beam-vertical 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Reduced Motion Compliance */
+@media (prefers-reduced-motion: reduce) {
+  .animate-scan-beam,
+  .animate-pulse-subtle {
+    animation: none !important;
+  }
+  .animate-scan-beam {
+    top: 48% !important;
+    opacity: 0.75 !important;
+  }
 }
 
 @media print {

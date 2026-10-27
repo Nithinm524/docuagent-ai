@@ -1,0 +1,538 @@
+# DOCUAGENT AI: Complete Privacy, Security, Legal and Pre-Launch Audit
+
+Act as a senior application security engineer, privacy engineer, full-stack developer, and software compliance reviewer.
+
+Audit and improve my existing **DOCUAGENT AI, an AI Document Review and Routing Agent**. Review the actual source code, frontend, backend, database, authentication, APIs, dependencies, document-processing pipeline, third-party integrations, privacy notices, and deployment configuration.
+
+## CRITICAL IMPLEMENTATION RULES
+
+1. Inspect the existing codebase before making changes.
+2. Implement all applicable requirements directly in the existing application.
+3. Preserve existing functionality, including document uploads, OCR, document classification, validation, reviewer queues, routing, audit history, reports, demo scenarios, consent settings, and security controls.
+4. Do not replace working architecture unnecessarily.
+5. Do not create fake security checks, simulated audit results, placeholder compliance badges, or decorative settings that do not work.
+6. Never invent API keys, contact details, business information, pricing, subscription plans, legal claims, or compliance certifications.
+7. Distinguish implemented controls from external configuration requirements and issues that require legal review.
+8. Do not delete production data, rewrite shared Git history, change subscription plans, or make irreversible changes without explicit authorization.
+9. Do not claim that the website is legally compliant merely because a policy page or consent banner exists.
+10. After implementation, run available tests and provide an honest pre-launch audit report.
+
+# 1. Check Data Retention
+
+Inspect how DOCUAGENT AI stores and retains:
+
+- Uploaded identity documents and other files.
+- Extracted text and OCR results.
+- Document metadata and validation results.
+- User accounts and authentication records.
+- Reviewer notes, routing decisions, and audit logs.
+- Reports, temporary files, and generated exports.
+- Consent records and security logs.
+- Backups and cached data.
+
+Implement a documented retention policy based on actual business requirements.
+
+Requirements:
+- Collect and retain only data that is necessary for the application's stated purpose.
+- Define retention periods by data category.
+- Delete temporary uploads and intermediate files when they are no longer needed.
+- Add automatic cleanup jobs where supported.
+- Ensure deletion procedures address relevant database records, file storage, caches, and backups according to the documented policy.
+- Do not delete audit records required for security or applicable legal obligations without evaluating those obligations.
+- Document any data that cannot immediately be removed from backups.
+- Avoid storing complete identity-document numbers or extracted document contents unless necessary.
+- Update the Privacy Policy to accurately explain retention practices.
+
+Do not invent retention periods. Identify decisions that require product-owner or legal approval.
+
+# 2. Remove Exposed API Keys
+
+Inspect the source code, Git repository, environment configuration, build artifacts, frontend bundles, and server logs for exposed secrets.
+
+Check for:
+- Gemini API keys.
+- Database credentials.
+- Service-role keys.
+- Authentication secrets.
+- Access tokens.
+- Private keys.
+- Payment provider secrets, if payments exist.
+- Other credentials and connection strings.
+
+Requirements:
+- Move private credentials to server-side environment variables or a supported secrets manager.
+- Ensure secrets are never exposed through frontend code, public configuration, browser storage, or API responses.
+- Add appropriate `.gitignore` rules.
+- Add an `.env.example` file containing placeholder values only.
+- Remove exposed credentials from tracked files.
+- Provide Git history cleanup instructions where needed.
+- Recommend revoking and rotating confirmed exposed credentials immediately.
+
+Never print discovered secret values in the audit report.
+
+# 3. Fix Insecure Authentication
+
+Inspect the complete authentication lifecycle.
+
+Implement or correct:
+- Server-side authentication on protected endpoints.
+- Secure session or token validation.
+- Expiration and revocation of sessions.
+- Secure logout.
+- Session rotation after authentication and privilege changes.
+- Appropriate password policies if local passwords are supported.
+- Protection against brute-force attacks.
+- Safe error messages that do not reveal whether sensitive account information exists.
+- Secure recovery procedures.
+- Appropriate protection against CSRF where cookie-based authentication is used.
+
+Never trust frontend route guards or hidden buttons as security controls.
+
+If authentication is provided by an external service, use its supported security mechanisms instead of creating a competing authentication system.
+
+If the current application has no real authentication system, identify that limitation and implement a suitable approach compatible with its architecture.
+
+# 4. Protect Password Reset
+
+Audit password reset and account recovery flows.
+
+Requirements:
+- Use cryptographically secure, unpredictable, single-use reset tokens.
+- Store reset tokens securely, preferably as hashes.
+- Set appropriate token expiration.
+- Invalidate tokens after successful use.
+- Prevent token reuse and repeated reset submissions.
+- Rate-limit reset requests and token verification.
+- Avoid revealing whether an email address is registered.
+- Do not send passwords through email.
+- Invalidate or appropriately rotate active sessions after a password reset.
+- Notify the account holder about successful password changes when supported.
+- Protect reset links against accidental token leakage through logs, referrers, and analytics.
+
+If password resets are handled by an authentication provider, audit the provider configuration and document the required settings.
+
+# 5. Check User Permissions
+
+Inspect every role, route, API endpoint, database query, document operation, and administrative action.
+
+Requirements:
+- Enforce authorization on the server for every protected operation.
+- Apply least-privilege access.
+- Verify record ownership or tenant membership before returning data.
+- Prevent users from changing document IDs to access other users' records.
+- Restrict administrative actions to authorized administrators.
+- Prevent unauthorized changes to reviewer decisions, routing outcomes, risk assessments, and audit records.
+- Validate roles and permissions against trusted server-side data.
+- Reject access by default when permissions cannot be established.
+- Test access across multiple accounts and roles.
+
+Create an authorization matrix showing which roles can perform each sensitive action.
+
+# 6. Remove Admin Backdoors
+
+Inspect the entire application for:
+- Hardcoded administrator passwords.
+- Default credentials.
+- Hidden login routes.
+- Undocumented admin accounts.
+- Unauthenticated administrative endpoints.
+- Debug routes that expose internal data.
+- Secret query parameters that bypass authorization.
+- Test-only authentication bypasses.
+- Development shortcuts accidentally enabled in production.
+- Privileged database credentials used by frontend code.
+
+Remove unauthorized bypasses and insecure defaults.
+
+Do not remove a legitimate administrative account or disable a required recovery mechanism without confirming its purpose. Do not create new backdoors.
+
+Require secure, documented administrative access and record privileged actions in an appropriately protected audit trail.
+
+# 7. Audit Database Access
+
+Inspect the actual persistence layer, queries, database credentials, and storage permissions.
+
+If a relational database is configured:
+- Use parameterized queries or safe ORM methods.
+- Apply least-privilege database credentials.
+- Enable Row-Level Security where supported and appropriate.
+- Create restrictive policies for SELECT, INSERT, UPDATE, and DELETE.
+- Prevent cross-user and cross-tenant access.
+- Review database functions, views, stored procedures, and privileged execution contexts.
+- Audit migrations and production database permissions.
+
+If a managed database such as Supabase is used:
+- Keep privileged service-role credentials on the server.
+- Use only the intended public client key in frontend code.
+- Do not treat the public key as an authorization mechanism.
+- Verify that RLS policies actually protect private records.
+
+If the application currently uses JSON files or another non-relational store:
+- Do not pretend SQL policies or RLS are active.
+- Implement appropriate server-side access checks, file permissions, locking, and data isolation.
+- Clearly identify remaining limitations.
+
+Never migrate or replace the existing database without explicit authorization.
+
+# 8. Fix Exposed User Data
+
+Inspect frontend bundles, APIs, browser storage, logs, reports, file downloads, error messages, and third-party integrations for unnecessary personal data exposure.
+
+Requirements:
+- Return only fields required for the current operation.
+- Restrict access to uploaded documents and generated reports.
+- Prevent private files from being served through public URLs.
+- Redact sensitive document numbers and personal data from logs.
+- Remove unnecessary personal information from analytics and debugging output.
+- Prevent unauthorized users from accessing reviewer notes and audit history.
+- Apply appropriate cache-control directives to private responses.
+- Review browser storage for unnecessary personal data.
+- Protect sensitive data in exports and generated reports.
+- Use safe error messages without stack traces or database details.
+
+Add regression tests for cross-user document access and accidental personal-data disclosure.
+
+# 9. Add Rate Limiting
+
+Apply server-side rate limits to:
+- Login and authentication attempts.
+- Password reset requests.
+- Registration, if available.
+- Document uploads.
+- OCR and document extraction.
+- Expensive AI requests.
+- Report generation.
+- Public forms and other abuse-prone endpoints.
+
+Requirements:
+- Use appropriate per-IP and per-account limits.
+- Use shared storage for limits in multi-instance deployments.
+- Return appropriate HTTP 429 responses.
+- Provide a reasonable retry message.
+- Avoid revealing sensitive account information.
+- Add request-size limits, timeouts, and resource controls.
+- Ensure rate limits cannot be trivially bypassed by changing client-side values.
+
+Do not add rate-limit UI without enforcing limits on the server.
+
+# 10. Check Third-Party Permissions
+
+Identify every external service that receives data or can access application resources.
+
+Inspect:
+- AI and document-processing providers.
+- OCR services.
+- Authentication providers.
+- Database and file-storage providers.
+- Analytics and tracking tools.
+- Embedded widgets.
+- Error-monitoring tools.
+- Payment processors, if configured.
+- External scripts and fonts.
+
+For each integration, document:
+- Purpose.
+- Data shared.
+- Permissions granted.
+- Whether personal or document data is transmitted.
+- Whether the integration is necessary.
+- Applicable retention and privacy settings.
+- Required credentials and access scopes.
+
+Remove unused integrations and excessive permissions.
+
+Do not send uploaded identity documents or extracted personal data to a third party unless the integration is necessary, appropriately disclosed, and authorized.
+
+Do not claim a vendor has approved privacy or security practices without verifying the relevant evidence.
+
+# 11. Remove Copied or Unauthorized Content
+
+Audit the website's text, graphics, icons, illustrations, templates, screenshots, images, and other assets.
+
+Requirements:
+- Identify content that appears copied from unrelated websites, competing products, or proprietary materials.
+- Remove unauthorized material or replace it with original content.
+- Preserve legitimate third-party assets when their use is properly licensed.
+- Review documentation, marketing copy, interface labels, and demo scenarios.
+- Avoid copying another product's branding, distinctive design, or proprietary text.
+- Do not automatically delete content solely because it resembles a common interface pattern.
+- Flag uncertain cases for human review.
+
+Do not claim that content is original or plagiarism-free unless the review supports that conclusion.
+
+# 12. Check Trademark Usage
+
+Inspect:
+- DOCUAGENT AI name and logo.
+- Product branding.
+- Page titles and metadata.
+- Marketing copy.
+- Partner and vendor names.
+- Logos and third-party marks.
+- Claims implying endorsement, partnership, or affiliation.
+
+Requirements:
+- Identify potential trademark conflicts or misleading affiliation claims.
+- Do not use another organization's logo or trademark in a way that suggests endorsement without authorization.
+- Remove unsupported partnership and certification claims.
+- Keep accurate references to third-party products where needed.
+- Flag potential conflicts for an appropriate trademark search and legal review.
+
+Do not claim that the DOCUAGENT AI name is legally available without a proper trademark search.
+
+# 13. Verify Open-Source Licenses
+
+Inspect package manifests, lockfiles, installed dependencies, bundled libraries, copied code, and third-party assets.
+
+Requirements:
+- Generate a dependency and license inventory.
+- Identify license names and available attribution requirements.
+- Flag licenses that may impose source-disclosure, redistribution, attribution, or other obligations.
+- Check for missing license notices and required acknowledgments.
+- Identify packages with unknown, missing, conflicting, or unusual license metadata.
+- Recommend removing unnecessary dependencies where appropriate.
+- Preserve required license files and notices.
+- Run available dependency vulnerability checks separately from license checks.
+
+Do not assume a package is permissively licensed merely because it is publicly available.
+
+Do not provide a definitive legal opinion on license compatibility. Flag uncertain cases for legal review.
+
+# 14. Fix Misleading Pricing
+
+Inspect the website for pricing claims, subscription prices, plan comparisons, usage limits, free-trial claims, billing periods, and payment-related language.
+
+Requirements:
+- Use only verified, owner-approved pricing information.
+- Remove invented prices, fake discounts, false free-trial claims, and unsupported guarantees.
+- Clearly identify billing frequency, applicable taxes, usage limits, renewal terms, and important restrictions where relevant.
+- Ensure prices displayed in the interface match the actual configured billing system.
+- If pricing has not been finalized, show a neutral message such as "Contact us for pricing" only if a real contact method exists, or omit the pricing claim.
+- Do not imply that a paid subscription exists if no subscription system is configured.
+- Do not add fabricated payment buttons or billing features.
+
+# 15. Add Cancellation Flows
+
+First inspect whether DOCUAGENT AI actually supports subscriptions or recurring payments.
+
+If subscriptions exist:
+- Provide a clear, accessible cancellation path.
+- Explain when cancellation takes effect.
+- Show the relevant renewal or end date.
+- Explain what happens to account access and stored data.
+- Confirm the cancellation result.
+- Prevent duplicate cancellation requests.
+- Keep cancellation records and handle payment-provider errors safely.
+- Ensure the application reflects the actual subscription status returned by the trusted billing provider.
+- Do not make cancellation unnecessarily difficult.
+
+If subscriptions do not exist:
+- Do not invent a subscription system.
+- Mark subscription cancellation as not applicable and identify any future implementation requirements.
+
+Do not cancel real customer subscriptions or change production billing settings without explicit authorization.
+
+# 16. Add Subscription Disclosures
+
+If paid plans or recurring subscriptions exist, ensure users can understand before purchase:
+- The amount charged.
+- Currency and billing interval.
+- Whether the plan renews automatically.
+- Trial duration and post-trial charges, if applicable.
+- Usage limits and important exclusions.
+- Cancellation procedures.
+- Refund terms.
+- Applicable taxes or additional fees.
+- What happens when a plan expires or payment fails.
+
+Ensure disclosures are visible before the user commits to a purchase.
+
+Use the actual payment-provider configuration and approved commercial terms.
+
+If no payment system exists, do not display fake subscription disclosures or payment claims. Report the requirement as not applicable.
+
+# 17. Remove Unnecessary Tracking
+
+Audit cookies, local storage, session storage, analytics, advertising scripts, pixels, embedded widgets, and other tracking mechanisms.
+
+Requirements:
+- Remove unused trackers and unnecessary third-party scripts.
+- Collect only information needed for the stated purpose.
+- Do not place sensitive document contents, extracted text, identity numbers, or authentication secrets in analytics.
+- Respect the existing consent manager and applicable consent choices.
+- Prevent optional tracking from starting before the required consent is obtained.
+- Allow users to change or withdraw consent.
+- Update the Cookie Policy and Privacy Policy to reflect actual practices.
+- Avoid fingerprinting and undisclosed tracking.
+- Verify that consent settings persist appropriately.
+- Ensure essential security and session functions continue to work without optional analytics.
+
+Do not claim that tracking has been completely removed until the application and relevant network requests have been inspected.
+
+# 18. Add Account Deletion
+
+If user accounts exist, implement a secure account deletion workflow.
+
+Requirements:
+- Require the user to authenticate and confirm the request.
+- Prevent CSRF and unauthorized deletion.
+- Clearly explain the consequences before confirmation.
+- Delete or anonymize account-associated personal data according to the approved retention policy and applicable obligations.
+- Address uploaded documents, extracted text, reports, user preferences, and stored personal information.
+- Revoke sessions and tokens after successful deletion.
+- Prevent deleted accounts from continuing to access protected endpoints.
+- Handle related records and database constraints safely.
+- Provide clear success and error messages.
+- Explain any data retained for legitimate legal or security reasons and the applicable retention period.
+- Address backups according to the documented deletion policy.
+- Do not silently retain personal data indefinitely.
+
+Use soft deletion only when justified and documented. If immediate permanent deletion is required and appropriate, implement it safely.
+
+Do not delete other users' data or production accounts during testing.
+
+If account management is not yet implemented, document the required architecture and clearly report what remains blocked.
+
+# 19. Check Regional Requirements
+
+Review the website's actual data processing, intended users, business model, deployment region, and third-party providers.
+
+Assess potentially applicable requirements, including:
+- India's Digital Personal Data Protection Act, 2023, and applicable rules and commencement notifications.
+- GDPR and relevant national implementing laws where applicable.
+- UK data protection requirements where applicable.
+- Relevant consumer protection and subscription disclosure rules.
+- Applicable cookie and electronic communications rules.
+- Children's privacy requirements where relevant.
+- Cross-border data transfers where applicable.
+- Data breach notification and security obligations.
+- Relevant sector-specific obligations if the product processes regulated information.
+
+For India, specifically assess:
+- Clear and accessible privacy notices.
+- Appropriate lawful processing grounds and consent mechanisms where required.
+- Data minimisation and purpose limitation.
+- Reasonable security safeguards.
+- Retention and erasure obligations.
+- User rights and grievance handling where applicable.
+- Breach response procedures.
+- Children's data requirements if the service is directed at or used by children.
+- Applicable phased commencement dates and transitional requirements.
+
+Requirements:
+- Verify current official legal sources before describing the current legal position.
+- Distinguish binding legal requirements from recommendations and best practices.
+- Do not assume every law applies to every user or deployment.
+- Do not claim that a privacy policy, cookie banner, or consent checkbox alone establishes compliance.
+- Do not invent a Data Protection Officer, grievance officer, legal representative, or contact address.
+- Flag uncertain applicability and legal questions for qualified legal review.
+
+# 20. Run a Complete Pre-Launch Audit
+
+Perform a comprehensive review of the actual application before public deployment.
+
+### Security
+- Secret exposure.
+- Authentication and password recovery.
+- Authorization and role enforcement.
+- Admin backdoors and debug routes.
+- Database access and RLS where applicable.
+- Cross-user document access.
+- Input validation and injection risks.
+- XSS and CSRF.
+- File upload restrictions.
+- Rate limiting.
+- Secure cookies and security headers.
+- HTTPS and mixed content.
+- Dependency vulnerabilities.
+
+### Privacy
+- Data collection and minimisation.
+- Retention and deletion.
+- Cookie and tracking consent.
+- Third-party data sharing.
+- Sensitive data in logs.
+- Privacy and cookie notices.
+- Account deletion and user requests.
+- Backup and incident-response procedures.
+
+### Legal and Commercial
+- Trademark concerns.
+- Third-party content rights.
+- Open-source licenses.
+- Pricing accuracy.
+- Subscription disclosures.
+- Cancellation and refund flows where applicable.
+- Regional requirements and unresolved legal questions.
+
+### Quality and Operations
+- Production build and tests.
+- Error handling.
+- Broken links.
+- Mobile responsiveness.
+- Accessibility.
+- Document processing failures.
+- Database backup and recovery.
+- Logging and monitoring.
+- Deployment configuration.
+- Performance under concurrent usage.
+
+Do not run destructive security tests against production systems. Use a controlled test environment and synthetic test data for penetration-style checks.
+
+## Required Automated Tests
+
+Where supported by the current codebase, add tests for:
+- Unauthorized access to private documents.
+- Cross-user and cross-tenant record access.
+- Unauthorized role or ownership changes.
+- Password reset token expiration and reuse.
+- Login and recovery rate limits.
+- Upload type and size restrictions.
+- SQL injection protection where SQL is used.
+- XSS protection for user and extracted document content.
+- Secret exposure checks.
+- API response data minimisation.
+- Account deletion.
+- Retention cleanup.
+- Consent-based tracking.
+- Subscription and cancellation behaviour, if supported.
+- Existing document-processing and reviewer workflows.
+
+Run available build, lint, unit tests, integration tests, dependency scans, license checks, and secret scans. Report tools that are unavailable instead of inventing results.
+
+## Final Audit Report
+
+After completing the work, provide a structured report containing:
+
+| Area | Status | Findings | Changes Made | Tests and Evidence | Remaining Actions |
+|---|---|---|---|---|---|
+
+Use these status labels:
+- **PASS:** Implemented and verified.
+- **PARTIAL:** Some controls implemented, with remaining gaps.
+- **FAIL:** A material issue remains.
+- **BLOCKED:** External access, credentials, or configuration is required.
+- **NOT APPLICABLE:** The feature does not exist or is not relevant to the current application.
+
+Also provide:
+
+1. Critical and high-risk findings that must be resolved before launch.
+2. Files and configurations changed.
+3. Database migrations and access policies created.
+4. Any exposed credentials requiring rotation, without displaying their values.
+5. Data retention and deletion gaps.
+6. Third-party services and their access requirements.
+7. Open-source license concerns.
+8. Pricing, billing, and cancellation gaps.
+9. Regional legal questions requiring professional review.
+10. External deployment steps still required.
+11. Exact commands executed and their results.
+12. A final launch recommendation: **Ready for controlled testing**, **Not ready for public launch**, or **Ready subject to listed conditions**, based on actual evidence.
+
+## Final Rule
+
+Modify the existing DOCUAGENT AI application directly. Do not merely create a checklist or a security dashboard.
+
+Implement the controls that are possible within the current project, test them, and clearly identify anything that requires external configuration, production access, business decisions, or legal review.
+
+Never claim a feature is complete without evidence that it works.

@@ -199,3 +199,27 @@ export const standardApiLimiter = createRateLimiter({
   maxRequests: parseInt(process.env.STANDARD_RATE_LIMIT_MAX || '120', 10), // 120 reads per minute
   routeLabel: 'general-api'
 });
+
+export const authLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15-minute sliding window
+  maxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX || '5', 10), // 5 login attempts per 15 minutes
+  routeLabel: 'authentication'
+});
+
+export const dpdpLimiter = createRateLimiter({
+  windowMs: 60000,
+  maxRequests: 10, // 10 DPDP requests per minute
+  routeLabel: 'dpdp-requests'
+});
+
+export const passwordResetLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15-minute sliding window
+  maxRequests: 5, // 5 password reset attempts per 15 min
+  routeLabel: 'password-reset'
+});
+
+export const accountActionLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000, // 15-minute sliding window
+  maxRequests: 5, // 5 account management actions per 15 min
+  routeLabel: 'account-actions'
+});
