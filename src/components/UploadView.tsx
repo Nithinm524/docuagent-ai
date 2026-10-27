@@ -29,7 +29,6 @@ import {
   ScanningStage,
   StageDetail
 } from './DocumentScanningAnimation.tsx';
-import { useAuth } from '../context/AuthContext.tsx';
 import { authFetch, ensureAuthToken } from '../utils/authFetch.ts';
 
 interface UploadViewProps {
@@ -51,7 +50,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
   onOpenTerms,
   onOpenDataCollection
 }) => {
-  const { userSession } = useAuth();
   const [documentType, setDocumentType] = useState<DocumentType | 'auto'>('auto');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileContentText, setFileContentText] = useState<string>('');
@@ -479,25 +477,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
         <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
           Upload PDF or image files for intelligent text extraction, deterministic rule validation, and routing.
         </p>
-      </div>
-
-      {/* Session & Pipeline Health Status Indicator */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400">
-        <div className="flex items-center space-x-2">
-          <ShieldCheck className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-          <span className="font-medium text-slate-700 dark:text-slate-300">
-            Authenticated Reviewer:
-          </span>
-          <span className="font-mono text-cyan-700 dark:text-cyan-300">
-            {userSession ? `${userSession.email} (${userSession.role})` : 'Lead Reviewer (Sandbox Session)'}
-          </span>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-slate-500 dark:text-slate-400">
-            Intake Pipeline: <strong className="text-slate-700 dark:text-slate-200">Active</strong> &middot; Max 15MB (PDF, PNG, JPEG)
-          </span>
-        </div>
       </div>
 
       {/* Animated Document Scanning Experience & Results */}
