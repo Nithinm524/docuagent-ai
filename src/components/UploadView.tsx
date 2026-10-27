@@ -57,9 +57,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [fileContentText, setFileContentText] = useState<string>('');
   const [fileDataUrl, setFileDataUrl] = useState<string>('');
   const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
-  const [includeCrossDoc, setIncludeCrossDoc] = useState(false);
-  const [crossDocName, setCrossDocName] = useState('');
-  const [crossDocText, setCrossDocText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [pipelineStep, setPipelineStep] = useState(0);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
@@ -91,7 +88,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
   // Mandatory Affirmative Consent & Terms Acceptance (Unchecked by default)
   const [consentGiven, setConsentGiven] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
-  const [optionalFeedbackConsent, setOptionalFeedbackConsent] = useState(false);
   const consentCheckboxRef = useRef<HTMLInputElement>(null);
   const termsCheckboxRef = useRef<HTMLInputElement>(null);
 
@@ -278,8 +274,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
           documentType,
           rawText: fileContentText || undefined,
           fileDataUrl: payloadDataUrl || undefined,
-          crossReferenceFileName: includeCrossDoc ? crossDocName || 'secondary_doc.pdf' : undefined,
-          crossReferenceText: includeCrossDoc ? crossDocText : undefined,
           consentRecord: {
             notice_version: '2026.1',
             timestamp: new Date().toISOString(),
@@ -764,58 +758,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
             </div>
           </div>
 
-          {/* Step 3: Optional Cross-Document Verification */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0B1120] p-4 sm:p-5 space-y-3 shadow-xs">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">
-                  Cross-Document Consistency Verification
-                </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Optionally attach a secondary document (e.g. proof of address or utility bill) to test cross-field consistency rules.
-                </p>
-              </div>
-              <input
-                type="checkbox"
-                id="includeCrossDoc"
-                checked={includeCrossDoc}
-                onChange={(e) => setIncludeCrossDoc(e.target.checked)}
-                className="w-4 h-4 rounded text-cyan-600 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:ring-cyan-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer"
-              />
-            </div>
-
-            {includeCrossDoc && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Secondary Document Name
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. secondary_utility_bill.pdf"
-                    value={crossDocName}
-                    onChange={(e) => setCrossDocName(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                    Secondary Document Text Payload (for comparison)
-                  </label>
-                  <textarea
-                    rows={3}
-                    placeholder="e.g. Utility Bill issued to Jordan Taylor Smith at 1204 Pine Crest Rd..."
-                    value={crossDocText}
-                    onChange={(e) => setCrossDocText(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Step 4: Document Intake Privacy Notice & Affirmative Consent (DPDP Ready) */}
+          {/* Step 3: Document Intake Privacy Notice & Affirmative Consent (DPDP Ready) */}
           <div className="rounded-xl border border-cyan-200 dark:border-cyan-950/70 bg-cyan-50/40 dark:bg-[#071322] p-4 sm:p-5 space-y-3.5 shadow-xs">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center space-x-2 text-cyan-800 dark:text-cyan-300">
@@ -923,23 +866,6 @@ export const UploadView: React.FC<UploadViewProps> = ({
                     DOCUAGENT AI Terms of Use (v2026.1)
                   </button>{' '}
                   governing document intake, automated validation heuristics, reviewer queues, and assistive decision support.
-                </label>
-              </div>
-
-              {/* Separate Optional Feedback / Performance Telemetry Checkbox (Unbundled) */}
-              <div className="flex items-start space-x-2.5 pl-6 pt-1">
-                <input
-                  type="checkbox"
-                  id="optional-telemetry-checkbox"
-                  checked={optionalFeedbackConsent}
-                  onChange={(e) => setOptionalFeedbackConsent(e.target.checked)}
-                  className="w-3.5 h-3.5 mt-0.5 rounded text-cyan-600 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 focus:ring-cyan-500 cursor-pointer shrink-0"
-                />
-                <label
-                  htmlFor="optional-telemetry-checkbox"
-                  className="text-[11px] text-slate-600 dark:text-slate-400 cursor-pointer"
-                >
-                  (Optional) Contribute anonymous latency metrics to help tune server OCR throughput. Not required for document review.
                 </label>
               </div>
 
