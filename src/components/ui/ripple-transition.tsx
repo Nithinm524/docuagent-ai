@@ -203,6 +203,8 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
   const transitioningRef = useRef(false);
   const currentIndexRef = useRef(0);
   const lastPointerOriginRef = useRef<[number, number]>([0.5, 0.5]);
+  const hoverAnimationFrameRef = useRef<number | null>(null);
+  const lastHoverRippleAtRef = useRef(0);
   const propsRef = useRef(props);
   const imagesReadyRef = useRef(false);
   const imagesRef = useRef(images);
@@ -267,6 +269,10 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     const toIndex = ((targetIndex % imageCount) + imageCount) % imageCount;
     if (toIndex === fromIndex) return;
 
+    if (hoverAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+      hoverAnimationFrameRef.current = null;
+    }
     transitioningRef.current = true;
     setIsTransitioning(true);
     propsRef.current.onTransitionStart?.(fromIndex, toIndex);
@@ -316,6 +322,51 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     transitionTo(currentIndexRef.current + 1, origin);
   }, [transitionTo]);
 
+  // Animate a distortion-only ripple from the current cursor position. This does
+  // not change the active image; it makes the wave respond to pointer movement.
+  const triggerHoverRipple = useCallback((origin: [number, number]) => {
+    if (
+      !interactive ||
+      !imagesReadyRef.current ||
+      transitioningRef.current ||
+      !resourcesRef.current ||
+      imagesRef.current.length < 1
+    ) return;
+
+    const now = performance.now();
+    // Throttle hover waves so moving the cursor creates distinct expanding ripples
+    // without starting hundreds of animations per second.
+    if (now - lastHoverRippleAtRef.current < 220) return;
+    lastHoverRippleAtRef.current = now;
+
+    if (hoverAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+    }
+
+    const imageIndex = currentIndexRef.current;
+    const startedAt = now;
+    const rippleDuration = 720;
+
+    const tick = (frameTime: number) => {
+      if (transitioningRef.current || !imagesReadyRef.current) {
+        hoverAnimationFrameRef.current = null;
+        return;
+      }
+      const progress = Math.min(1, (frameTime - startedAt) / rippleDuration);
+      // Render the same image on both texture slots: only the expanding distortion
+      // is visible, while autoplay/click transitions continue to change scenes.
+      renderFrame(progress, imageIndex, imageIndex, origin);
+      if (progress < 1) {
+        hoverAnimationFrameRef.current = window.requestAnimationFrame(tick);
+      } else {
+        hoverAnimationFrameRef.current = null;
+        renderFrame(1, imageIndex, imageIndex, origin);
+      }
+    };
+
+    hoverAnimationFrameRef.current = window.requestAnimationFrame(tick);
+  }, [interactive, renderFrame]);
+
   // Initialize WebGL and preload every image in the same effect so resource creation
   // always happens before image uploads. Autoplay waits for this loader to finish.
   useEffect(() => {
@@ -357,11 +408,13 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
       setWebglSupported(false);
       return;
     }
+    // Correct UV orientation: pair this with UNPACK_FLIP_Y_WEBGL=1 below
+    // so all background images render upright rather than upside down.
     const vertices = new Float32Array([
-      -1, -1, 0, 1,
-       1, -1, 1, 1,
-      -1,  1, 0, 0,
-       1,  1, 1, 0
+      -1, -1, 0, 0,
+       1, -1, 1, 0,
+      -1,  1, 0, 1,
+       1,  1, 1, 1
     ]);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
     gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
@@ -470,6 +523,10 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
         window.cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
       }
+      if (hoverAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+        hoverAnimationFrameRef.current = null;
+      }
       if (autoplayTimerRef.current !== null) {
         window.clearInterval(autoplayTimerRef.current);
         autoplayTimerRef.current = null;
@@ -535,8 +592,10 @@ export const RippleTransitionCanvas: React.FC<RippleTransitionProps> = (props) =
     if (!rect.width || !rect.height) return;
     lastPointerOriginRef.current = [
       Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-      Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+      // WebGL UV coordinates increase upward, while browser pointer Y increases downward.
+      1 - Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
     ];
+    triggerHoverRipple(lastPointerOriginRef.current);
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
