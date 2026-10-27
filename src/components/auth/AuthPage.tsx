@@ -46,6 +46,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
     signInGithub,
     signInEmail,
     signUpEmail,
+    signInDemo,
     resetPassword,
     authError,
     clearAuthError
@@ -145,6 +146,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
     }
   };
 
+  const handleDemoAccess = async () => {
+    if (submitting) return;
+    setActiveProvider('demo');
+    setSubmitting(true);
+    clearAuthError();
+    try {
+      await signInDemo();
+      onSuccess();
+    } catch {
+      // Handled via context
+    } finally {
+      setSubmitting(false);
+      setActiveProvider(null);
+    }
+  };
+
   const switchMode = (newMode: AuthMode) => {
     clearAuthError();
     setResetSuccessMessage(null);
@@ -152,12 +169,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
   };
 
   return (
-    <div className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6 lg:p-8 bg-[#030712] text-slate-100 overflow-x-hidden font-sans selection:bg-cyan-500 selection:text-slate-950">
+    <div className="relative min-h-screen w-full flex items-center justify-center p-4 sm:p-6 bg-[#030712] text-slate-100 overflow-x-hidden font-sans selection:bg-cyan-500 selection:text-slate-950">
       {/* 
         Full-Screen WebGL RippleTransition Background
-        Covers the entire viewport with smooth ripple wave animations between technology visuals.
+        Vibrantly renders the technological scenes and dynamic ripple wave distortion.
       */}
-      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+      <div className="fixed inset-0 z-0 overflow-hidden">
         <RippleTransition
           images={AUTH_SCENES}
           duration={1.4}
@@ -176,17 +193,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
           borderRadius={0}
           background="#030712"
           label="DOCUAGENT AI animated login background"
-          className="absolute inset-0 h-full w-full"
+          interactive={true}
+          className="w-full h-full"
         />
 
-        {/* Deep navy/black frosted overlay and radial vignette to ensure pristine contrast */}
-        <div className="absolute inset-0 bg-[#030712]/25 dark:bg-[#030712]/30 backdrop-blur-[1px] pointer-events-none" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#030712] via-transparent to-[#030712]/85 pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_transparent_30%,_#030712_92%)] pointer-events-none" />
-
-        {/* Subtle Cyan and Teal Ambient Glow Highlights */}
-        <div className="absolute top-1/4 left-1/3 -translate-x-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/3 right-1/3 translate-x-1/2 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+        {/* Soft edge darkening only so images and ripple wave remain clearly visible */}
+        <div className="pointer-events-none absolute inset-0 bg-radial-[circle_at_center,_transparent_50%,_rgba(3,7,18,0.7)_100%]" />
       </div>
 
       {/* 
@@ -304,6 +316,23 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
             {/* OAuth Provider Buttons (Sign-in & Sign-up) */}
             {mode !== 'forgot' && (
               <div className="space-y-2.5">
+                {/* 0. Instant Sandbox Access (Lead Reviewer) */}
+                <button
+                  type="button"
+                  onClick={handleDemoAccess}
+                  disabled={submitting}
+                  className="w-full relative group overflow-hidden px-4 py-2.5 rounded-xl border border-cyan-500/50 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-200 text-xs font-semibold flex items-center justify-center space-x-2.5 transition-all shadow-md shadow-cyan-950/50 cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-cyan-500"
+                >
+                  <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full duration-1000 bg-gradient-to-r from-transparent via-cyan-400/10 to-transparent transition-transform" />
+
+                  {activeProvider === 'demo' ? (
+                    <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+                  )}
+                  <span>Continue as Demo Reviewer (1-Click)</span>
+                </button>
+
                 {/* 1. Continue with Google */}
                 <button
                   type="button"

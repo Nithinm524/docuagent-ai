@@ -22,6 +22,7 @@ import { usePageMetadata, PAGE_METADATA } from './utils/usePageMetadata.ts';
 import { CaseRecord, ReviewerQueue, CaseStatus } from './shared/types.ts';
 import { APP_VERSION } from './shared/version.ts';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
+import { authFetch } from './utils/authFetch.ts';
 import { AuthPage } from './components/auth/AuthPage.tsx';
 import { AuthLoadingScreen } from './components/auth/AuthLoadingScreen.tsx';
 import {
@@ -292,12 +293,12 @@ function AppContent() {
   // Fetch initial cases and stats
   const fetchCases = async () => {
     try {
-      const res = await fetch('/api/cases');
+      const res = await authFetch('/api/cases');
       if (res.ok) {
         const data = await res.json();
         setCases(data);
       }
-      const storageRes = await fetch('/api/storage-info');
+      const storageRes = await authFetch('/api/storage-info');
       if (storageRes.ok) {
         const sInfo = await storageRes.json();
         setStorageInfo(sInfo);
@@ -397,7 +398,7 @@ function AppContent() {
   const handleRunSample = async (scenarioId: string) => {
     setLoadingSampleId(scenarioId);
     try {
-      const res = await fetch(`/api/samples/load/${scenarioId}`, {
+      const res = await authFetch(`/api/samples/load/${scenarioId}`, {
         method: 'POST'
       });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
@@ -416,7 +417,7 @@ function AppContent() {
   const handleResetSeed = async () => {
     setIsResetting(true);
     try {
-      const res = await fetch('/api/cases/reset-seed', { method: 'POST' });
+      const res = await authFetch('/api/cases/reset-seed', { method: 'POST' });
       if (res.ok) {
         await fetchCases();
         setSelectedCaseId(null);
@@ -434,7 +435,7 @@ function AppContent() {
   const handleFieldUpdated = async (fieldId: string, reviewedValue: string) => {
     if (!selectedCaseId) return;
     try {
-      const res = await fetch(`/api/cases/${selectedCaseId}/fields/${fieldId}`, {
+      const res = await authFetch(`/api/cases/${selectedCaseId}/fields/${fieldId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviewedValue, reviewerLabel: 'Human Specialist' })
@@ -455,7 +456,7 @@ function AppContent() {
   const handleFindingResolved = async (findingId: string, resolved: boolean, notes?: string) => {
     if (!selectedCaseId) return;
     try {
-      const res = await fetch(`/api/cases/${selectedCaseId}/findings/${findingId}/resolve`, {
+      const res = await authFetch(`/api/cases/${selectedCaseId}/findings/${findingId}/resolve`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resolved, notes, reviewerLabel: 'Human Specialist' })
@@ -482,7 +483,7 @@ function AppContent() {
   ) => {
     setIsProcessingAction(true);
     try {
-      const res = await fetch(`/api/cases/${targetCaseId}/review-action`, {
+      const res = await authFetch(`/api/cases/${targetCaseId}/review-action`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -512,7 +513,7 @@ function AppContent() {
     if (!selectedCaseId) return;
     setIsProcessingAction(true);
     try {
-      const res = await fetch(`/api/cases/${selectedCaseId}/re-run`, {
+      const res = await authFetch(`/api/cases/${selectedCaseId}/re-run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviewer: 'Human Specialist' })
@@ -536,7 +537,7 @@ function AppContent() {
     if (!selectedCaseId) return;
     setIsProcessingAction(true);
     try {
-      const res = await fetch(`/api/cases/${selectedCaseId}/generate-summary`, {
+      const res = await authFetch(`/api/cases/${selectedCaseId}/generate-summary`, {
         method: 'POST'
       });
       if (res.ok) {
@@ -557,7 +558,7 @@ function AppContent() {
 
   const handleDeleteCase = async (caseId: string) => {
     try {
-      const res = await fetch(`/api/cases/${caseId}`, { method: 'DELETE' });
+      const res = await authFetch(`/api/cases/${caseId}`, { method: 'DELETE' });
       if (res.ok) {
         setSelectedCaseId(null);
         await fetchCases();
@@ -572,7 +573,7 @@ function AppContent() {
 
   const handlePurgeCaseData = async (caseId: string) => {
     try {
-      const res = await fetch(`/api/cases/${caseId}/purge-data`, {
+      const res = await authFetch(`/api/cases/${caseId}/purge-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Data Minimisation & Erasure Workflow' })
@@ -594,7 +595,7 @@ function AppContent() {
 
   const handleWithdrawConsent = async (caseId: string) => {
     try {
-      const res = await fetch(`/api/cases/${caseId}/withdraw-consent`, {
+      const res = await authFetch(`/api/cases/${caseId}/withdraw-consent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'Data Principal requested consent withdrawal' })

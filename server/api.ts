@@ -314,6 +314,44 @@ api.post('/api/auth/logout', (req: Request, res: Response) => {
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
+api.post('/api/auth/demo', authLimiter, (req: Request, res: Response) => {
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.cookie(SESSION_COOKIE_NAME, 'demo-reviewer-token', {
+    httpOnly: true,
+    secure: isHttps,
+    sameSite: 'lax',
+    maxAge: 8 * 60 * 60 * 1000,
+    path: '/'
+  });
+
+  res.cookie(CSRF_COOKIE_NAME, 'firebase-bearer-exempt', {
+    httpOnly: false,
+    secure: isHttps,
+    sameSite: 'lax',
+    maxAge: 8 * 60 * 60 * 1000,
+    path: '/'
+  });
+
+  log({
+    level: 'INFO',
+    operation: 'DEMO_AUTH_GRANTED',
+    message: 'Issued demo reviewer session token for sandbox evaluation.'
+  });
+
+  res.json({
+    success: true,
+    token: 'demo-reviewer-token',
+    csrfToken: 'firebase-bearer-exempt',
+    user: {
+      userId: 'usr-reviewer-01',
+      email: 'reviewer@docuagent.local',
+      name: 'Lead Reviewer Morgan',
+      role: 'reviewer',
+      tenantId: 'tenant-enterprise-primary'
+    }
+  });
+});
+
 api.get('/api/auth/me', optionalAuth, (req: Request, res: Response) => {
   const user = (req as any).user;
   res.json({
@@ -732,10 +770,11 @@ api.post(
         requestId: reqId,
         message: fileValidation.error || 'Invalid upload file'
       });
+      const isSizeError = fileValidation.error?.includes('exceeds');
       return sendError(
         res,
-        400,
-        'UNSUPPORTED_FILE_TYPE',
+        isSizeError ? 413 : 400,
+        isSizeError ? 'FILE_TOO_LARGE' : 'UNSUPPORTED_FILE_TYPE',
         fileValidation.error || 'Upload validation failed.',
         reqId
       );

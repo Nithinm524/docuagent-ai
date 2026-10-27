@@ -32,6 +32,7 @@ interface AuthContextType {
   signInGithub: () => Promise<void>;
   signInEmail: (email: string, pass: string, rememberMe?: boolean) => Promise<void>;
   signUpEmail: (email: string, pass: string, fullName: string) => Promise<void>;
+  signInDemo: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   signOutUser: () => Promise<void>;
   idToken: string | null;
@@ -42,14 +43,19 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userSession, setUserSession] = useState<UserSession | null>(null);
-  const [idToken, setIdToken] = useState<string | null>(null);
+  const [idToken, setIdToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('docuagent_session_token');
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<{ title: string; message: string; isConfigNotice?: boolean } | null>(null);
 
   // Map Firebase user to DOCUAGENT user session
   const mapFirebaseToSession = useCallback((fbUser: FirebaseUser): UserSession => {
     const email = fbUser.email || 'user@docuagent.local';
-    // Assign role: admin for enterprise domain or specific roles; reviewer default
     const isEnterpriseAdmin = email.endsWith('@docuagent.local') && (email.includes('admin') || email.includes('lead'));
     const isAuditor = email.includes('auditor') || email.includes('compliance');
     const role: UserSession['role'] = isEnterpriseAdmin ? 'admin' : isAuditor ? 'viewer' : 'reviewer';
@@ -62,7 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Listen to Firebase auth state changes
+  // Listen to Firebase auth state changes or restore cached session
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
@@ -72,17 +78,62 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const token = await fbUser.getIdToken();
           setIdToken(token);
           syncSessionCookie(token);
+          try {
+            localStorage.setItem('docuagent_session_token', token);
+          } catch {}
         } catch {
           setIdToken(null);
           syncSessionCookie(null);
         }
+        setLoading(false);
       } else {
+        // If not logged in with Firebase, check for cached local session or demo token
+        const cachedToken = (() => {
+          try {
+            return localStorage.getItem('docuagent_session_token');
+          } catch {
+            return null;
+          }
+        })();
+
+        if (cachedToken) {
+          try {
+            const res = await fetch('/api/auth/me', {
+              headers: {
+                'Authorization': `Bearer ${cachedToken}`,
+                'X-Session-Token': cachedToken
+              },
+              credentials: 'include'
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.authenticated && data.user) {
+                const u = data.user;
+                setUserSession({
+                  user_id: u.userId,
+                  email: u.email,
+                  role: u.role,
+                  full_name: u.name
+                });
+                setCurrentUser({
+                  uid: u.userId,
+                  email: u.email,
+                  displayName: u.name
+                } as any);
+                setIdToken(cachedToken);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch {}
+        }
+
         setCurrentUser(null);
         setUserSession(null);
         setIdToken(null);
         syncSessionCookie(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -126,9 +177,95 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
     try {
       await signInEmailPassword(email, pass, rememberMe);
+    } catch (firebaseErr: any) {
+      // If Firebase auth throws user-not-found or invalid credentials, attempt local backend auth
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email: email.trim(), password: pass })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token && data.user) {
+            const u = data.user;
+            setIdToken(data.token);
+            try {
+              localStorage.setItem('docuagent_session_token', data.token);
+            } catch {}
+            setUserSession({
+              user_id: u.userId,
+              email: u.email,
+              role: u.role,
+              full_name: u.name
+            });
+            setCurrentUser({
+              uid: u.userId,
+              email: u.email,
+              displayName: u.name
+            } as any);
+            syncSessionCookie(data.token);
+            return;
+          }
+        }
+      } catch {}
+
+      setAuthError(formatAuthError(firebaseErr));
+      throw firebaseErr;
+    }
+  };
+
+  const signInDemo = async () => {
+    setAuthError(null);
+    try {
+      const res = await fetch('/api/auth/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      if (!res.ok) throw new Error('Demo authentication failed');
+      const data = await res.json();
+      if (data.token && data.user) {
+        const u = data.user;
+        setIdToken(data.token);
+        try {
+          localStorage.setItem('docuagent_session_token', data.token);
+        } catch {}
+        setUserSession({
+          user_id: u.userId,
+          email: u.email,
+          role: u.role,
+          full_name: u.name
+        });
+        setCurrentUser({
+          uid: u.userId,
+          email: u.email,
+          displayName: u.name
+        } as any);
+        syncSessionCookie(data.token);
+      }
     } catch (err: any) {
-      setAuthError(formatAuthError(err));
-      throw err;
+      setAuthError({
+        title: 'Demo Access Notice',
+        message: 'Could not initialize demo reviewer session. Using offline sandbox mode.'
+      });
+      // Fallback local session state
+      setIdToken('demo-reviewer-token');
+      try {
+        localStorage.setItem('docuagent_session_token', 'demo-reviewer-token');
+      } catch {}
+      setUserSession({
+        user_id: 'usr-reviewer-01',
+        email: 'reviewer@docuagent.local',
+        role: 'reviewer',
+        full_name: 'Lead Reviewer Morgan'
+      });
+      setCurrentUser({
+        uid: 'usr-reviewer-01',
+        email: 'reviewer@docuagent.local',
+        displayName: 'Lead Reviewer Morgan'
+      } as any);
     }
   };
 
@@ -157,12 +294,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await logOut();
       syncSessionCookie(null);
-      // Remove any leftover session state
-      localStorage.removeItem('docuagent_active_tab');
-      localStorage.removeItem('docuagent_selected_case');
-      localStorage.removeItem('docuagent_redirect_target');
+      try {
+        localStorage.removeItem('docuagent_session_token');
+        localStorage.removeItem('docuagent_active_tab');
+        localStorage.removeItem('docuagent_selected_case');
+        localStorage.removeItem('docuagent_redirect_target');
+      } catch {}
     } catch (err: any) {
       console.error('[FirebaseAuth] Logout error:', err);
+    } finally {
+      setCurrentUser(null);
+      setUserSession(null);
+      setIdToken(null);
     }
   };
 
@@ -179,6 +322,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signInGithub,
         signInEmail,
         signUpEmail,
+        signInDemo,
         resetPassword,
         signOutUser,
         idToken

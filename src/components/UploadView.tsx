@@ -29,6 +29,8 @@ import {
   ScanningStage,
   StageDetail
 } from './DocumentScanningAnimation.tsx';
+import { useAuth } from '../context/AuthContext.tsx';
+import { authFetch, ensureAuthToken } from '../utils/authFetch.ts';
 
 interface UploadViewProps {
   onCaseProcessed: (caseId: string) => void;
@@ -49,6 +51,7 @@ export const UploadView: React.FC<UploadViewProps> = ({
   onOpenTerms,
   onOpenDataCollection
 }) => {
+  const { userSession } = useAuth();
   const [documentType, setDocumentType] = useState<DocumentType | 'auto'>('auto');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileContentText, setFileContentText] = useState<string>('');
@@ -257,8 +260,11 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
       if (uploadRequestCounterRef.current !== currentRequestId) return;
 
-      // Call Backend API with streaming event stream
-      const res = await fetch('/api/cases/process?stream=true', {
+      // Pre-acquire authentication token to guarantee session credentials
+      await ensureAuthToken();
+
+      // Call Backend API with streaming event stream using authFetch
+      const res = await authFetch('/api/cases/process?stream=true', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -294,7 +300,19 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server returned status ${res.status}`);
+        let humanMessage = errorData.error;
+        if (res.status === 401) {
+          humanMessage = errorData.error || 'Authentication credentials required for this endpoint. Please verify your session credentials or switch to Demo Reviewer mode.';
+        } else if (res.status === 413) {
+          humanMessage = errorData.error || 'File size limit exceeded. The uploaded document exceeds the 15MB maximum boundary.';
+        } else if (res.status === 400 && errorData.code === 'UNSUPPORTED_FILE_TYPE') {
+          humanMessage = errorData.error || 'Unsupported document format. Allowed formats are PDF, PNG, and JPEG.';
+        } else if (res.status === 409) {
+          humanMessage = errorData.error || 'A document with matching contents is currently processing. Please wait a moment.';
+        } else if (res.status >= 500) {
+          humanMessage = 'Document extraction service encountered an unexpected error. Automatic fallback has been engaged.';
+        }
+        throw new Error(humanMessage || `Server returned status ${res.status}`);
       }
 
       const contentType = res.headers.get('content-type') || '';
@@ -467,6 +485,25 @@ export const UploadView: React.FC<UploadViewProps> = ({
         <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
           Upload PDF or image files for intelligent text extraction, deterministic rule validation, and routing.
         </p>
+      </div>
+
+      {/* Session & Pipeline Health Status Indicator */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-400">
+        <div className="flex items-center space-x-2">
+          <ShieldCheck className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+          <span className="font-medium text-slate-700 dark:text-slate-300">
+            Authenticated Reviewer:
+          </span>
+          <span className="font-mono text-cyan-700 dark:text-cyan-300">
+            {userSession ? `${userSession.email} (${userSession.role})` : 'Lead Reviewer (Sandbox Session)'}
+          </span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-slate-500 dark:text-slate-400">
+            Intake Pipeline: <strong className="text-slate-700 dark:text-slate-200">Active</strong> &middot; Max 15MB (PDF, PNG, JPEG)
+          </span>
+        </div>
       </div>
 
       {/* Animated Document Scanning Experience & Results */}

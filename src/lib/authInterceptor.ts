@@ -23,8 +23,14 @@ export function syncSessionCookie(token: string | null) {
   try {
     if (token) {
       document.cookie = `${SESSION_COOKIE_NAME}=${token}; path=/; max-age=3600; SameSite=Lax`;
+      try {
+        localStorage.setItem('docuagent_session_token', token);
+      } catch {}
     } else {
       document.cookie = `${SESSION_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+      try {
+        localStorage.removeItem('docuagent_session_token');
+      } catch {}
     }
   } catch (err) {
     console.warn('[AuthInterceptor] Could not sync session cookie:', err);

@@ -251,7 +251,13 @@ export const DocumentScanningAnimation: React.FC<DocumentScanningAnimationProps>
                   {error}
                 </p>
                 <p className="text-[11px] text-rose-700 dark:text-rose-400 pt-1">
-                  How to resolve: Ensure the file is not password-protected, does not exceed 15MB, and contains legible printed or digital text.
+                  {error.includes('credentials') || error.includes('Authentication')
+                    ? 'How to resolve: Verify your session credentials or use the 1-Click Demo Reviewer mode to proceed.'
+                    : error.includes('15MB') || error.includes('size')
+                    ? 'How to resolve: Compress the document or split pages so the file is under the 15MB upload boundary.'
+                    : error.includes('format') || error.includes('extension')
+                    ? 'How to resolve: Ensure the document is in PDF, PNG, or JPEG format.'
+                    : 'How to resolve: Ensure the file is not password-protected, does not exceed 15MB, and contains legible printed or digital text.'}
                 </p>
               </div>
             </div>
