@@ -44,7 +44,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
     signInGoogle,
     signInMicrosoft,
     signInGithub,
-    signInDemo,
     signInEmail,
     signUpEmail,
     resetPassword,
@@ -127,22 +126,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
     }
   };
 
-  // Handle one-click demo reviewer sign-in without changing the real sign-in providers.
-  const handleDemoSignIn = async () => {
-    if (submitting) return;
-    setActiveProvider('demo');
-    setSubmitting(true);
-    clearAuthError();
-    try {
-      await signInDemo();
-      onSuccess();
-    } catch {
-      // Error handled via AuthContext.
-    } finally {
-      setSubmitting(false);
-      setActiveProvider(null);
-    }
-  };
 
   // Handle OAuth Provider Sign In
   const handleOAuthSignIn = async (providerName: 'google' | 'microsoft' | 'github') => {
@@ -322,22 +305,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSuccess, onOpenPage }) => 
             {/* OAuth Provider Buttons (Sign-in & Sign-up) */}
             {mode !== 'forgot' && (
               <div className="space-y-2.5">
-                {/* One-click demo reviewer access for evaluation. */}
-                <button
-                  type="button"
-                  onClick={handleDemoSignIn}
-                  disabled={submitting}
-                  className="w-full relative group overflow-hidden px-4 py-2.5 rounded-xl border border-cyan-700/80 bg-cyan-950/60 hover:bg-cyan-900/70 hover:border-cyan-400/70 text-cyan-100 text-xs font-semibold flex items-center justify-center space-x-2.5 transition-all shadow-xs cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-cyan-500"
-                >
-                  {activeProvider === 'demo' ? (
-                    <RefreshCw className="w-4 h-4 animate-spin text-cyan-300" />
-                  ) : (
-                    <ShieldCheck className="w-4 h-4 text-cyan-300" />
-                  )}
-                  <span>Continue as Demo Reviewer (1-Click)</span>
-                </button>
-
-                {/* Continue with Google */}
+{/* Continue with Google */}
                 <button
                   type="button"
                   onClick={() => handleOAuthSignIn('google')}
