@@ -1,6 +1,6 @@
 /**
- * DOCUAGENT AI — server/agent.ts
- * Stable PDF and image extraction.
+ * DOCUAGENT AI — Document Extraction and Review Agent
+ * File: server/agent.ts
  */
 
 import { GoogleGenAI } from '@google/genai';
@@ -9,7 +9,8 @@ import {
   DocumentType,
   ExtractedField,
   ValidationFinding,
-  AuditEvent
+  AuditEvent,
+  AgentStepTrace
 } from '../src/shared/types.ts';
 import {
   DOCUMENT_SCHEMAS,
@@ -24,1216 +25,1020 @@ import { usageTracker } from './usageTracker.ts';
 import { validateUploadFile, sanitizeFileName } from './fileValidation.ts';
 import { log } from './logger.ts';
 
-let genAIClient: GoogleGenAI | null = null;
-
-export function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-
-  if (!genAIClient) {
-    genAIClient = new GoogleGenAI({ apiKey });
-  }
-
-  return genAIClient;
-}
-
-export interface ProcessDocumentOptions {
+type UploadInput = {
   fileName: string;
   fileSizeKb: number;
   fileMime: string;
-  documentType: DocumentType | 'auto';
+  documentType?: string;
   rawText?: string;
   fileDataUrl?: string;
   crossReferenceFileName?: string;
   crossReferenceText?: string;
   isUnreadable?: boolean;
-  manualFields?: Record<string, string>;
-  consentRecord?: {
-    notice_version: string;
-    timestamp: string;
-    purpose: string;
-    legal_basis:
-      | 'consent'
-      | 'legitimate_uses'
-      | 'legal_obligation'
-      | 'operator_assessment_pending';
-    affirmative_action: boolean;
-    user_declaration: boolean;
-  };
-}
-
-type AIField = { value: string; confidence: number };
-
-type AIExtraction = {
-  rawText: string;
-  fields: Record<string, AIField>;
-  isUnreadable: boolean;
-  unreadableReason?: string;
-  detectedDocumentType?: DocumentType;
+  manualFields?: Record<string, unknown>;
+  consentRecord?: CaseRecord['consent_record'];
 };
 
-function getMimeType(
-  fileMime: string | undefined,
-  fileName: string,
-  dataUrl?: string
-): string {
-  const fromDataUrl = dataUrl?.match(/^data:([^;,]+)/i)?.[1]?.toLowerCase();
+type StageCallback = (detail: {
+  stage: string;
+  message: string;
+  detail?: Record<string, unknown>;
+}) => void;
 
-  if (fromDataUrl) {
-    return fromDataUrl === 'image/jpg' ? 'image/jpeg' : fromDataUrl;
-  }
+let client: GoogleGenAI | null = null;
 
-  const supplied = (fileMime || '').toLowerCase().trim();
+export function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
 
-  if (supplied && supplied !== 'application/octet-stream') {
-    return supplied === 'image/jpg' ? 'image/jpeg' : supplied;
-  }
-
-  const name = fileName.toLowerCase();
-
-  if (name.endsWith('.pdf')) return 'application/pdf';
-  if (name.endsWith('.png')) return 'image/png';
-  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
-  if (name.endsWith('.webp')) return 'image/webp';
-  if (name.endsWith('.gif')) return 'image/gif';
-  if (name.endsWith('.tif') || name.endsWith('.tiff')) return 'image/tiff';
-  if (name.endsWith('.bmp')) return 'image/bmp';
-
-  return 'application/octet-stream';
-}
-
-function normalizeDocumentDataUrl(
-  data: string | undefined,
-  mime: string,
-  fileName: string
-): string | undefined {
-  if (!data?.trim()) return undefined;
-
-  const value = data.trim();
-  const dataUrlMatch = value.match(/^data:([^,]+),([\s\S]*)$/i);
-
-  if (dataUrlMatch) {
-    const dataUrlMime = dataUrlMatch[1].split(';')[0].toLowerCase();
-    const supported = new Set([
-      'application/pdf',
-      'image/png',
-      'image/jpeg',
-      'image/webp',
-      'image/gif',
-      'image/tiff',
-      'image/bmp'
-    ]);
-
-    const normalizedMime =
-      dataUrlMime === 'image/jpg' ? 'image/jpeg' : dataUrlMime;
-
-    if (!supported.has(normalizedMime)) return undefined;
-
-    return `data:${normalizedMime};base64,${dataUrlMatch[2].replace(/\s/g, '')}`;
-  }
-
-  const resolvedMime = getMimeType(mime, fileName);
-  const supported = new Set([
-    'application/pdf',
-    'image/png',
-    'image/jpeg',
-    'image/webp',
-    'image/gif',
-    'image/tiff',
-    'image/bmp'
-  ]);
-
-  if (!supported.has(resolvedMime)) return undefined;
-
-  const base64 = value.replace(/\s/g, '');
-  if (!base64) return undefined;
-
-  return `data:${resolvedMime};base64,${base64}`;
-}
-
-function getBase64(dataUrl: string): string {
-  const comma = dataUrl.indexOf(',');
-  return comma >= 0 ? dataUrl.slice(comma + 1).replace(/\s/g, '') : dataUrl;
-}
-
-function normalizeAIFields(value: unknown): Record<string, AIField> {
-  const result: Record<string, AIField> = {};
-
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return result;
-  }
-
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof raw === 'string' || typeof raw === 'number') {
-      result[key] = { value: String(raw).trim(), confidence: 0.7 };
-      continue;
-    }
-
-    if (!raw || typeof raw !== 'object') continue;
-
-    const item = raw as Record<string, unknown>;
-    const rawValue = item.value ?? item.text ?? '';
-    const confidence = Number(item.confidence ?? 0.7);
-
-    result[key] = {
-      value:
-        typeof rawValue === 'string' || typeof rawValue === 'number'
-          ? String(rawValue).trim()
-          : '',
-      confidence: Number.isFinite(confidence)
-        ? Math.max(0, Math.min(1, confidence))
-        : 0
-    };
-  }
-
-  return result;
-}
-
-function normalizeKey(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function getAIField(
-  fields: Record<string, AIField>,
-  name: string,
-  label: string
-): AIField | undefined {
-  const expected = [normalizeKey(name), normalizeKey(label)];
-
-  for (const [key, field] of Object.entries(fields)) {
-    if (expected.includes(normalizeKey(key))) return field;
-  }
-
-  return undefined;
-}
-
-async function extractDocumentWithGemini(
-  documentType: DocumentType,
-  fileMime: string,
-  fileDataUrl: string,
-  fileName: string
-): Promise<AIExtraction | null> {
-  const client = getGeminiClient();
-  if (!client) {
-    log({
-      level: 'ERROR',
-      operation: 'GEMINI_API_KEY_MISSING',
-      message: 'GEMINI_API_KEY is not configured.'
-    });
+  if (!apiKey) {
     return null;
   }
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (!client) {
+    client = new GoogleGenAI({ apiKey });
+  }
+
+  return client;
+}
+
+function newId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function cleanText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value
+    .replace(/\u0000/g, '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
+function decodeDataUrl(dataUrl: string): {
+  mimeType: string;
+  base64: string;
+} | null {
+  const match = dataUrl.match(
+    /^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,([\s\S]+)$/i
+  );
+
+  if (!match) return null;
+
+  return {
+    mimeType: (match[1] || 'application/octet-stream').toLowerCase(),
+    base64: match[2].replace(/\s/g, '')
+  };
+}
+
+function normalizeMimeType(mime: string, fileName: string): string {
+  const normalized = (mime || '').toLowerCase().split(';')[0].trim();
+
+  if (normalized === 'application/pdf') return normalized;
+  if (normalized === 'image/png') return normalized;
+  if (normalized === 'image/jpeg' || normalized === 'image/jpg') {
+    return 'image/jpeg';
+  }
+
+  const extension = fileName.toLowerCase().split('.').pop();
+
+  if (extension === 'pdf') return 'application/pdf';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+
+  return normalized || 'application/octet-stream';
+}
+
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
 
   try {
-    const normalized = normalizeDocumentDataUrl(
-      fileDataUrl,
-      fileMime,
-      fileName
-    );
-
-    if (!normalized) {
-      throw new Error('Invalid or unsupported document payload.');
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
-
-    const mimeType = getMimeType(fileMime, fileName, normalized);
-    const base64Data = getBase64(normalized);
-
-    if (!base64Data || mimeType === 'application/octet-stream') {
-      throw new Error(`Invalid payload or MIME type: ${mimeType}`);
-    }
-
-    const schema = DOCUMENT_SCHEMAS[documentType];
-    if (!schema) throw new Error(`Unknown document schema: ${documentType}`);
-
-    const prompt = `
-You are a document OCR and structured extraction engine.
-
-Read the attached PDF or image. Extract all readable text from all visible
-pages and return it in raw_text. The attachment can be a scanned PDF,
-a text PDF, or a raster image.
-
-Document schema: ${schema.title}
-
-Extract these fields:
-${schema.fields
-  .map(
-    (field) =>
-      `- ${field.name}: "${field.label}", type=${field.type}, required=${field.required}`
-  )
-  .join('\n')}
-
-Rules:
-- Inspect the actual attachment, not just its filename.
-- For invoices, extract vendor/supplier and billed-to/customer separately.
-- Extract invoice number only when explicitly labelled as an invoice number.
-- Never substitute GSTIN, phone number, tax ID, purchase order number, or
-  registration number for the invoice number.
-- Preserve the original values, dates, currency, and identifiers.
-- Do not invent values.
-- Return an empty value and confidence 0 for absent fields.
-- Set is_unreadable true only when the document is blank, corrupted, or
-  genuinely unreadable.
-- Determine the actual document type from its contents.
-
-Return valid JSON only:
-{
-  "is_unreadable": false,
-  "unreadable_reason": "",
-  "document_type": "${documentType}",
-  "raw_text": "all readable text",
-  "fields": {
-    "field_name": {
-      "value": "exact value",
-      "confidence": 0.95
-    }
+  } catch {
+    // The model may have wrapped JSON in Markdown.
   }
-}`;
 
-    const budget = usageTracker.isOperationAllowed();
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
 
-    if (!budget.allowed) {
-      log({
-        level: 'WARN',
-        operation: 'AI_BUDGET_CAP',
-        message: `OCR skipped: ${budget.reason}`
-      });
-      return null;
+  if (start < 0 || end <= start) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed.slice(start, end + 1));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
+  } catch {
+    return null;
+  }
 
-    const timeoutMs = Number.parseInt(
-      process.env.AI_OCR_TIMEOUT_MS || '60000',
-      10
-    );
+  return null;
+}
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error('Gemini OCR timed out')),
-        timeoutMs
-      );
+function safeDocumentType(value: unknown): DocumentType {
+  const allowed: DocumentType[] = [
+    'passport',
+    'national_id',
+    'utility_bill',
+    'bank_statement',
+    'employment_verification',
+    'invoice',
+    'general_doc',
+    'unknown'
+  ];
+
+  if (typeof value !== 'string') return 'unknown';
+
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+
+  if (allowed.includes(normalized as DocumentType)) {
+    return normalized as DocumentType;
+  }
+
+  const aliases: Record<string, DocumentType> = {
+    id: 'national_id',
+    identity_card: 'national_id',
+    national_identity_card: 'national_id',
+    aadhaar: 'national_id',
+    aadhar: 'national_id',
+    passport_document: 'passport',
+    bill: 'utility_bill',
+    electricity_bill: 'utility_bill',
+    bank: 'bank_statement',
+    payslip: 'employment_verification',
+    salary_slip: 'employment_verification',
+    work_letter: 'employment_verification',
+    general: 'general_doc',
+    other: 'general_doc'
+  };
+
+  return aliases[normalized] || 'unknown';
+}
+
+function inferDocumentType(text: string): DocumentType {
+  const value = text.toLowerCase();
+
+  if (
+    value.includes('passport') ||
+    value.includes('passport no') ||
+    value.includes('passport number')
+  ) {
+    return 'passport';
+  }
+
+  if (
+    value.includes('aadhaar') ||
+    value.includes('aadhar') ||
+    value.includes('national identity') ||
+    value.includes('national id') ||
+    value.includes('identity card')
+  ) {
+    return 'national_id';
+  }
+
+  if (
+    value.includes('utility bill') ||
+    value.includes('electricity bill') ||
+    value.includes('water bill') ||
+    value.includes('gas bill') ||
+    value.includes('consumer number')
+  ) {
+    return 'utility_bill';
+  }
+
+  if (
+    value.includes('bank statement') ||
+    value.includes('account number') ||
+    value.includes('statement period') ||
+    value.includes('available balance')
+  ) {
+    return 'bank_statement';
+  }
+
+  if (
+    value.includes('employment verification') ||
+    value.includes('employment certificate') ||
+    value.includes('salary slip') ||
+    value.includes('payslip') ||
+    value.includes('designation')
+  ) {
+    return 'employment_verification';
+  }
+
+  if (
+    value.includes('invoice') ||
+    value.includes('invoice number') ||
+    value.includes('amount due') ||
+    value.includes('bill to')
+  ) {
+    return 'invoice';
+  }
+
+  if (value.length > 30) return 'general_doc';
+
+  return 'unknown';
+}
+
+function parseExtractedFields(
+  caseId: string,
+  object: Record<string, unknown>
+): ExtractedField[] {
+  const source = object.fields;
+
+  if (!Array.isArray(source)) return [];
+
+  const fields: ExtractedField[] = [];
+
+  for (const item of source) {
+    if (!item || typeof item !== 'object') continue;
+
+    const field = item as Record<string, unknown>;
+    const name = cleanText(field.name || field.field_name || field.key);
+    const label = cleanText(field.label || field.field_label || name);
+    const value = cleanText(field.value);
+
+    if (!name || !value) continue;
+
+    const confidenceValue = Number(field.confidence ?? 0.7);
+    const confidence = Number.isFinite(confidenceValue)
+      ? Math.min(1, Math.max(0, confidenceValue))
+      : 0.7;
+
+    fields.push({
+      field_id: newId('field'),
+      case_id: caseId,
+      field_name: name,
+      field_label: label || name,
+      field_value: value,
+      confidence,
+      is_uncertain: confidence < 0.65,
+      is_edited: false
     });
+  }
 
-    const request = client.models.generateContent({
-      model: process.env.GEMINI_OCR_MODEL || 'gemini-2.5-flash',
+  return fields;
+}
+
+function extractFieldsWithoutAI(
+  caseId: string,
+  text: string
+): ExtractedField[] {
+  const fields: ExtractedField[] = [];
+  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9 _./()-]{1,45})\s*[:\-]\s*(.{1,250})$/);
+
+    if (!match) continue;
+
+    const name = match[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const value = match[2].trim();
+
+    if (!name || !value) continue;
+
+    fields.push({
+      field_id: newId('field'),
+      case_id: caseId,
+      field_name: name,
+      field_label: match[1].trim(),
+      field_value: value,
+      confidence: 0.55,
+      is_uncertain: true,
+      is_edited: false
+    });
+  }
+
+  return fields.slice(0, 100);
+}
+
+async function extractTextWithGemini(
+  fileDataUrl: string,
+  fileName: string,
+  fileMime: string,
+  suppliedText = ''
+): Promise<{
+  text: string;
+  documentType: DocumentType;
+  fields: Record<string, unknown>;
+  method: string;
+}> {
+  const existingText = cleanText(suppliedText);
+
+  if (existingText.length > 20) {
+    return {
+      text: existingText,
+      documentType: inferDocumentType(existingText),
+      fields: {},
+      method: 'Provided Text'
+    };
+  }
+
+  const parsed = decodeDataUrl(fileDataUrl);
+
+  if (!parsed) {
+    return {
+      text: '',
+      documentType: 'unknown',
+      fields: {},
+      method: 'No Valid File Data'
+    };
+  }
+
+  const ai = getGeminiClient();
+
+  if (!ai) {
+    return {
+      text: '',
+      documentType: 'unknown',
+      fields: {},
+      method: 'Gemini API Key Missing'
+    };
+  }
+
+  const mimeType = normalizeMimeType(parsed.mimeType || fileMime, fileName);
+
+  if (!['application/pdf', 'image/png', 'image/jpeg'].includes(mimeType)) {
+    return {
+      text: '',
+      documentType: 'unknown',
+      fields: {},
+      method: 'Unsupported MIME Type'
+    };
+  }
+
+  try {
+    const prompt = `
+You are a document text extraction engine.
+
+Read the attached document carefully. Extract all readable text, preserving
+important labels, values, dates, amounts, identifiers, and line breaks.
+
+Do not invent missing information. If a value cannot be read, leave it blank.
+Do not decide whether the document is genuine or fraudulent.
+
+Return ONLY valid JSON using this structure:
+{
+  "documentType": "passport | national_id | utility_bill | bank_statement | employment_verification | invoice | general_doc | unknown",
+  "text": "all readable text from the document",
+  "fields": [
+    {
+      "name": "field_name",
+      "label": "Human-readable label",
+      "value": "exact extracted value",
+      "confidence": 0.0
+    }
+  ]
+}
+
+File name: ${fileName}
+`;
+
+    const response = await ai.models.generateContent({
+      model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
       contents: [
         {
-          inlineData: {
-            mimeType,
-            data: base64Data
-          }
-        },
-        { text: prompt }
+          role: 'user',
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: parsed.base64
+              }
+            }
+          ]
+        }
       ],
-      config: { responseMimeType: 'application/json' }
-    });
-
-    const response = await Promise.race([request, timeoutPromise]);
-
-    usageTracker.recordCall(
-      {
-        promptTokens: response.usageMetadata?.promptTokenCount,
-        completionTokens: response.usageMetadata?.candidatesTokenCount
-      },
-      true
-    );
-
-    const responseText = response.text?.trim();
-    if (!responseText) throw new Error('Gemini returned an empty response.');
-
-    let parsed: Record<string, unknown>;
-
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      const match = responseText.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error('Gemini returned invalid JSON.');
-      parsed = JSON.parse(match[0]);
-    }
-
-    const detectedType =
-      typeof parsed.document_type === 'string' &&
-      Object.prototype.hasOwnProperty.call(
-        DOCUMENT_SCHEMAS,
-        parsed.document_type
-      )
-        ? (parsed.document_type as DocumentType)
-        : undefined;
-
-    return {
-      rawText:
-        typeof parsed.raw_text === 'string' ? parsed.raw_text.trim() : '',
-      fields: normalizeAIFields(parsed.fields),
-      isUnreadable: parsed.is_unreadable === true,
-      unreadableReason:
-        typeof parsed.unreadable_reason === 'string'
-          ? parsed.unreadable_reason
-          : undefined,
-      detectedDocumentType: detectedType
-    };
-  } catch (error: unknown) {
-    usageTracker.recordCall(undefined, false);
-
-    log({
-      level: 'ERROR',
-      operation: 'GEMINI_OCR_FAILED',
-      message: 'Document OCR failed.',
-      details: {
-        fileName,
-        reason: error instanceof Error ? error.message : 'Unknown error'
+      config: {
+        temperature: 0.1,
+        responseMimeType: 'application/json'
       }
     });
 
-    return null;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
+    const responseText = cleanText(response.text || '');
+    const result = extractJsonObject(responseText);
 
-export async function extractSelectablePdfText(
-  fileDataUrl: string
-): Promise<{ text: string; pageCount: number } | null> {
-  try {
-    const normalized = normalizeDocumentDataUrl(
-      fileDataUrl,
-      'application/pdf',
-      'document.pdf'
-    );
-
-    if (!normalized) return null;
-
-    const buffer = Buffer.from(getBase64(normalized), 'base64');
-    if (!buffer.length) return null;
-
-    const { PDFParse } = await import('pdf-parse');
-    const parser = new PDFParse({ data: buffer });
-    const parsed = await parser.getText();
-    const text = (parsed.text || '')
-      .replace(/-- \d+ of \d+ --/g, '')
-      .trim();
-
-    return text.length >= 15
-      ? { text, pageCount: parsed.total || 1 }
-      : null;
-  } catch (error) {
-    log({
-      level: 'WARN',
-      operation: 'PDF_TEXT_EXTRACTION_FAILED',
-      message: 'PDF text extraction failed; Gemini OCR will be attempted.',
-      details: {
-        reason: error instanceof Error ? error.message : 'Unknown error'
-      }
-    });
-    return null;
-  }
-}
-
-export async function extractOcrWithTesseract(
-  fileDataUrl: string
-): Promise<string | null> {
-  if (!fileDataUrl.startsWith('data:image/')) return null;
-
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  try {
-    const normalized = normalizeDocumentDataUrl(
-      fileDataUrl,
-      'image/jpeg',
-      'document.jpg'
-    );
-    if (!normalized) return null;
-
-    const buffer = Buffer.from(getBase64(normalized), 'base64');
-    if (!buffer.length) return null;
-
-    const module = await import('tesseract.js');
-    const recognize =
-      (module as any).recognize ||
-      (module as any).default?.recognize;
-
-    if (typeof recognize !== 'function') return null;
-
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error('Tesseract OCR timed out')),
-        Number.parseInt(process.env.TESSERACT_TIMEOUT_MS || '20000', 10)
-      );
-    });
-
-    try {
-      const result = await Promise.race([
-        recognize(buffer, 'eng'),
-        timeout
-      ]) as any;
-
-      const text = result?.data?.text?.trim();
-      return text && text.length >= 10 ? text : null;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  } catch (error: unknown) {
-    log({
-      level: 'WARN',
-      operation: 'TESSERACT_OCR_FAILED',
-      message: 'Tesseract image OCR fallback failed.',
-      details: {
-        reason: error instanceof Error ? error.message : 'Unknown error'
-      }
-    });
-    return null;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-export function extractFieldsFromText(
-  documentType: DocumentType,
-  text: string,
-  manualFields?: Record<string, string>
-): ExtractedField[] {
-  const schema = DOCUMENT_SCHEMAS[documentType];
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-
-  const normalize = (value: string) =>
-    value.toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  const escapeRegExp = (value: string) =>
-    value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  const findLabel = (labels: string[]): string => {
-    const sorted = [...labels].sort((a, b) => b.length - a.length);
-
-    for (let i = 0; i < lines.length; i++) {
-      for (const label of sorted) {
-        const line = lines[i];
-        const normLine = normalize(line);
-        const normLabel = normalize(label);
-
-        if (
-          normLine !== normLabel &&
-          !normLine.startsWith(`${normLabel}:`) &&
-          !normLine.startsWith(`${normLabel} `) &&
-          !normLine.startsWith(`${normLabel}#`) &&
-          !normLine.startsWith(`${normLabel}-`)
-        ) {
-          continue;
-        }
-
-        const escaped = escapeRegExp(label);
-        const inline = line.match(
-          new RegExp(`^\\s*${escaped}\\s*(?::|#|-)\\s*(.*?)\\s*$`, 'i')
-        );
-
-        if (inline?.[1]?.trim()) return inline[1].trim();
-
-        const spaced = line.match(
-          new RegExp(`^\\s*${escaped}\\s+(.+?)\\s*$`, 'i')
-        );
-
-        if (spaced?.[1]?.trim()) return spaced[1].trim();
-
-        if (normLine === normLabel && lines[i + 1]) {
-          const next = lines[i + 1];
-          const nextNorm = normalize(next);
-
-          const nextIsLabel = sorted.some((candidate) => {
-            const n = normalize(candidate);
-            return (
-              nextNorm === n ||
-              nextNorm.startsWith(`${n}:`) ||
-              nextNorm.startsWith(`${n} `)
-            );
-          });
-
-          if (!nextIsLabel) return next;
-        }
-      }
-    }
-
-    return '';
-  };
-
-  const findInvoiceNumber = (): string => {
-    const patterns = [
-      /\b(?:tax\s+)?invoice\s*(?:number|no\.?|#|id)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\-\/._]*)/i,
-      /\binv\s*(?:number|no\.?|#|id)\s*[:#\-]?\s*([A-Z0-9][A-Z0-9\-\/._]*)/i
-    ];
-
-    for (const line of lines) {
-      for (const pattern of patterns) {
-        const match = line.match(pattern);
-        if (match?.[1] && /\d/.test(match[1])) {
-          return match[1].replace(/[.,;:]$/, '');
-        }
-      }
-    }
-
-    return '';
-  };
-
-  const findAmount = (labels: string[]): string => {
-    const candidate = findLabel(labels);
-    if (!candidate) return '';
-
-    return (
-      candidate.match(/(?:₹|Rs\.?|INR|USD|\$|€|£)?\s*\d[\d,]*(?:\.\d{1,2})?/i)?.[0]
-        ?.trim() || ''
-    );
-  };
-
-  const findDate = (labels: string[]): string => {
-    const candidate = findLabel(labels);
-    const match = candidate.match(
-      /\b(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{2,4})\b/i
-    );
-    return match?.[0] || '';
-  };
-
-  return schema.fields.map((definition) => {
-    const manualValue = manualFields?.[definition.name];
-
-    if (manualValue !== undefined) {
+    if (!result) {
       return {
-        field_id: `fld-${definition.name}`,
-        case_id: 'temp',
-        field_name: definition.name,
-        field_label: definition.label,
-        field_value: manualValue,
-        confidence: manualValue.trim() ? 0.99 : 0,
-        is_uncertain: definition.required && !manualValue.trim(),
-        is_edited: true
+        text: responseText,
+        documentType: inferDocumentType(responseText),
+        fields: {},
+        method: 'Gemini Text Extraction'
       };
     }
 
-    const combined = `${normalize(definition.name)} ${normalize(definition.label)}`;
-    let value = '';
-
-    if (
-      documentType === 'invoice' &&
-      /invoice.*(number|no|id)|invoice #/.test(combined)
-    ) {
-      value = findInvoiceNumber();
-    } else if (
-      documentType === 'invoice' &&
-      /(vendor|supplier|seller|issuer|company name)/.test(combined)
-    ) {
-      value = findLabel([
-        'vendor name',
-        'supplier name',
-        'seller name',
-        'issued by',
-        'from',
-        'supplier',
-        'vendor',
-        'seller'
-      ]);
-    } else if (
-      documentType === 'invoice' &&
-      /(billed to|bill to|customer|buyer|recipient|client)/.test(combined)
-    ) {
-      value = findLabel([
-        'billed to',
-        'bill to',
-        'customer name',
-        'client name',
-        'customer',
-        'client',
-        'buyer',
-        'recipient'
-      ]);
-    } else if (/(due date|invoice date|issue date|document date)/.test(combined)) {
-      value = findDate([
-        definition.label,
-        definition.name.replace(/_/g, ' '),
-        'invoice date',
-        'date of invoice',
-        'issue date',
-        'due date',
-        'date'
-      ]);
-    } else if (
-      /(grand total|total amount|invoice total|amount due|total due|subtotal)/.test(combined)
-    ) {
-      value = findAmount([
-        'grand total',
-        'invoice total',
-        'total due',
-        'amount due',
-        'total amount',
-        'subtotal',
-        'total'
-      ]);
-    } else {
-      value = findLabel([
-        definition.label,
-        definition.name.replace(/_/g, ' ')
-      ]);
-    }
+    const extractedText = cleanText(result.text);
+    const fields: Record<string, unknown> = {
+      fields: Array.isArray(result.fields) ? result.fields : []
+    };
 
     return {
-      field_id: `fld-${definition.name}`,
-      case_id: 'temp',
-      field_name: definition.name,
-      field_label: definition.label,
-      field_value: value,
-      confidence: value ? 0.8 : 0,
-      is_uncertain: Boolean(definition.required && !value),
-      is_edited: false
+      text: extractedText,
+      documentType: safeDocumentType(result.documentType) === 'unknown'
+        ? inferDocumentType(extractedText)
+        : safeDocumentType(result.documentType),
+      fields,
+      method: 'Gemini Multimodal Extraction'
     };
-  });
+  } catch (error) {
+    log.error(
+      'Gemini document extraction failed',
+      error instanceof Error ? error.message : String(error)
+    );
+
+    return {
+      text: '',
+      documentType: 'unknown',
+      fields: {},
+      method: 'Gemini Extraction Failed'
+    };
+  }
+}
+
+function buildFinding(
+  caseId: string,
+  checkName: string,
+  explanation: string,
+  severity: ValidationFinding['severity'] = 'medium'
+): ValidationFinding {
+  return {
+    finding_id: newId('finding'),
+    case_id: caseId,
+    check_name: checkName,
+    category: 'missing_information',
+    result: 'warning',
+    severity,
+    explanation,
+    resolved: false
+  };
+}
+
+function makeAudit(
+  caseId: string,
+  eventType: AuditEvent['event_type'],
+  summary: string,
+  details?: string
+): AuditEvent {
+  return {
+    event_id: newId('event'),
+    case_id: caseId,
+    event_type: eventType,
+    actor: 'AI Agent',
+    summary,
+    details,
+    created_at: new Date().toISOString()
+  };
+}
+
+function createTrace(
+  toolName: string,
+  purpose: string,
+  status: AgentStepTrace['status'],
+  output: string,
+  duration = 0
+): AgentStepTrace {
+  return {
+    step_number: 0,
+    tool_name: toolName,
+    tool_purpose: purpose,
+    status,
+    duration_ms: duration,
+    output_summary: output
+  };
+}
+
+function summarizeCase(
+  documentType: DocumentType,
+  status: CaseRecord['status'],
+  queue: CaseRecord['assigned_queue'],
+  findings: ValidationFinding[],
+  fields: ExtractedField[],
+  rawText: string
+): string {
+  try {
+    const summary = generateNeutralSummary(
+      documentType,
+      status,
+      queue,
+      findings,
+      fields,
+      rawText
+    );
+
+    if (typeof summary === 'string' && summary.trim()) {
+      return summary;
+    }
+  } catch (error) {
+    log.warn(
+      'Neutral summary generation failed',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+
+  const textPreview = rawText.trim().slice(0, 300);
+
+  return [
+    `Document type: ${documentType}.`,
+    `Current status: ${status}.`,
+    `Assigned queue: ${queue}.`,
+    `Extracted fields: ${fields.length}.`,
+    `Validation findings: ${findings.length}.`,
+    textPreview ? `Extracted text preview: ${textPreview}` : 'No readable text was extracted.',
+    'A human reviewer must make the final decision.'
+  ].join(' ');
 }
 
 export async function generateExecutiveSummary(
   documentType: DocumentType,
-  caseStatus: string,
-  assignedQueue: string,
+  status: CaseRecord['status'],
+  queue: CaseRecord['assigned_queue'],
   findings: ValidationFinding[],
   fields: ExtractedField[],
   rawText?: string
 ): Promise<string> {
-  return generateNeutralSummary(
+  return summarizeCase(
     documentType,
-    caseStatus as any,
-    assignedQueue as any,
+    status,
+    queue,
     findings,
-    fields
+    fields,
+    rawText || ''
   );
 }
-
-export type PipelineStage =
-  | 'uploaded'
-  | 'scanning'
-  | 'extracting'
-  | 'analyzing'
-  | 'validating'
-  | 'ready';
-
-export interface StageUpdateDetail {
-  stage: PipelineStage;
-  message: string;
-  method?: 'pdf_text' | 'ocr';
-  ocrMethodName?: string;
-  subMessage?: string;
-  documentType?: DocumentType;
-}
-
-export type StageUpdateCallback = (detail: StageUpdateDetail) => void;
 
 export async function runAgentPipeline(
-  options: ProcessDocumentOptions,
-  onStageUpdate?: StageUpdateCallback
+  input: UploadInput,
+  onStage?: StageCallback
 ): Promise<CaseRecord> {
-  const caseId = `case-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const caseNumber = `DOC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const emit = (
+    stage: string,
+    message: string,
+    detail?: Record<string, unknown>
+  ) => {
+    try {
+      onStage?.({ stage, message, detail });
+    } catch {
+      // A disconnected client must not crash document processing.
+    }
+  };
+
+  const started = Date.now();
+  const caseId = newId('case');
   const now = new Date().toISOString();
+  const safeName = sanitizeFileName(input.fileName || 'document.pdf');
+  const fileMime = normalizeMimeType(input.fileMime || '', safeName);
+  const fileSizeKb = Math.max(0, Number(input.fileSizeKb) || 0);
 
-  const normalizedDataUrl = normalizeDocumentDataUrl(
-    options.fileDataUrl,
-    options.fileMime,
-    options.fileName
-  );
+  const base: CaseRecord = {
+    case_id: caseId,
+    case_number: `DOC-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`,
+    version: 1,
+    document_type: 'unknown',
+    file_name: safeName,
+    file_size_kb: fileSizeKb,
+    file_mime: fileMime,
+    file_data_url: input.fileDataUrl,
+    raw_text: '',
+    cross_reference_file_name: input.crossReferenceFileName,
+    cross_reference_text: input.crossReferenceText,
+    is_selectable_pdf: false,
+    extraction_method: 'Not Started',
+    classification_reason: 'Document has not been classified.',
+    created_at: now,
+    updated_at: now,
+    status: 'Processing',
+    assigned_queue: 'General Review',
+    routing_reason: 'Document is being processed.',
+    extracted_fields: [],
+    validation_findings: [],
+    review_actions: [],
+    audit_events: [],
+    agent_trace: [],
+    consent_record: input.consentRecord
+  };
 
-  let rawText = options.rawText?.trim() || '';
-  let isUnreadable = Boolean(options.isUnreadable);
-  let isSelectablePdf = false;
-  let ocrMethod = rawText ? 'Provided Text' : 'Automated Text Extractor';
-  let aiFields: Record<string, AIField> | null = null;
-
-  const mimeType = getMimeType(
-    options.fileMime,
-    options.fileName,
-    normalizedDataUrl
-  );
-
-  const isPdf =
-    mimeType === 'application/pdf' ||
-    options.fileName.toLowerCase().endsWith('.pdf');
-
-  onStageUpdate?.({
-    stage: 'scanning',
-    message: 'Preparing document...',
-    subMessage: `Validating ${sanitizeFileName(options.fileName)}`
+  const validation = validateUploadFile({
+    fileName: safeName,
+    fileDataUrl: input.fileDataUrl,
+    fileMime,
+    fileSizeKb
   });
 
-  const uploadValidation = validateUploadFile({
-    fileName: options.fileName,
-    fileSizeKb: options.fileSizeKb,
-    fileMime: mimeType
-  });
+  if (!validation.valid) {
+    const failed: CaseRecord = {
+      ...base,
+      status: 'Processing Failed',
+      processing_error: validation.error || 'File validation failed.',
+      routing_reason: 'The uploaded file did not pass file validation.',
+      audit_events: [
+        makeAudit(
+          caseId,
+          'OCR_EXTRACTION_FAILED',
+          'File validation failed.',
+          validation.error
+        )
+      ],
+      agent_trace: [
+        createTrace(
+          'File Validation',
+          'Validate uploaded file type and size',
+          'failed',
+          validation.error || 'File validation failed.'
+        )
+      ]
+    };
 
-  if (!uploadValidation.valid) {
-    log({
-      level: 'WARN',
-      operation: 'UPLOAD_VALIDATION_FAILED',
-      message: uploadValidation.reason || 'Upload validation failed'
-    });
+    caseStore.create(failed);
+    emit('failed', 'File validation failed', { error: failed.processing_error });
+    return failed;
   }
 
-  if (isPdf && normalizedDataUrl && !rawText) {
-    onStageUpdate?.({
-      stage: 'extracting',
-      method: 'pdf_text',
-      message: 'Extracting selectable PDF text...',
-      ocrMethodName: 'PDF Text Parser'
-    });
+  emit('extracting', 'Extracting document text');
 
-    const pdfResult = await extractSelectablePdfText(normalizedDataUrl);
+  const extraction = await extractTextWithGemini(
+    input.fileDataUrl || '',
+    safeName,
+    fileMime,
+    input.rawText || ''
+  );
 
-    if (pdfResult?.text) {
-      rawText = pdfResult.text;
-      isSelectablePdf = true;
-      ocrMethod = 'Selectable PDF Text Parser';
+  let rawText = cleanText(input.rawText) || cleanText(extraction.text);
+  let documentType: DocumentType;
+
+  const requestedType = safeDocumentType(input.documentType);
+
+  if (input.documentType && input.documentType !== 'auto' && requestedType !== 'unknown') {
+    documentType = requestedType;
+  } else if (extraction.documentType !== 'unknown') {
+    documentType = extraction.documentType;
+  } else {
+    try {
+      documentType = safeDocumentType(detectDocumentType(rawText));
+    } catch {
+      documentType = inferDocumentType(rawText);
     }
   }
 
-  /*
-   * Critical fix:
-   * Run multimodal OCR when PDF text extraction returns nothing.
-   * Always pass a normalized data URL and its actual MIME type.
-   */
-  if (!rawText.trim() && normalizedDataUrl && !isUnreadable) {
-    onStageUpdate?.({
-      stage: 'extracting',
-      method: 'ocr',
-      message: isPdf
-        ? 'Reading scanned PDF pages...'
-        : 'Reading uploaded image...',
-      ocrMethodName: 'Gemini Multimodal OCR'
-    });
+  if (documentType === 'unknown') {
+    documentType = inferDocumentType(rawText);
+  }
 
-    const firstType: DocumentType =
-      options.documentType === 'auto'
-        ? ('general_doc' as DocumentType)
-        : options.documentType;
+  if (!rawText && input.isUnreadable) {
+    rawText = '';
+  }
 
-    const firstResult = await extractDocumentWithGemini(
-      firstType,
-      mimeType,
-      normalizedDataUrl,
-      options.fileName
+  emit('classifying', 'Classifying document', {
+    documentType,
+    extractionMethod: extraction.method
+  });
+
+  let extractedFields = parseExtractedFields(caseId, extraction.fields);
+
+  if (extractedFields.length === 0 && rawText) {
+    extractedFields = extractFieldsWithoutAI(caseId, rawText);
+  }
+
+  if (input.manualFields && typeof input.manualFields === 'object') {
+    for (const [key, rawValue] of Object.entries(input.manualFields)) {
+      const value = cleanText(rawValue);
+      if (!value) continue;
+
+      const existing = extractedFields.find(
+        (field) => field.field_name.toLowerCase() === key.toLowerCase()
+      );
+
+      if (existing) {
+        existing.field_value = value;
+        existing.confidence = 1;
+        existing.is_uncertain = false;
+        existing.is_edited = true;
+        existing.reviewed_value = value;
+      } else {
+        extractedFields.push({
+          field_id: newId('field'),
+          case_id: caseId,
+          field_name: key,
+          field_label: key.replace(/_/g, ' '),
+          field_value: value,
+          confidence: 1,
+          is_uncertain: false,
+          is_edited: true,
+          reviewed_value: value
+        });
+      }
+    }
+  }
+
+  emit('validating', 'Running document validation');
+
+  let findings: ValidationFinding[] = [];
+
+  try {
+    findings = runValidationChecks(
+      documentType,
+      extractedFields,
+      rawText
+    ) || [];
+  } catch (error) {
+    log.error(
+      'Validation engine failed',
+      error instanceof Error ? error.message : String(error)
     );
 
-    if (firstResult) {
-      rawText = firstResult.rawText.trim();
-      aiFields = firstResult.fields;
-
-      if (rawText) {
-        ocrMethod = isPdf
-          ? 'Scanned PDF OCR (Gemini)'
-          : 'Gemini Image OCR';
-      }
-
-      if (firstResult.isUnreadable && !rawText && !Object.keys(aiFields).length) {
-        isUnreadable = true;
-      }
-    }
-
-    if (!rawText.trim() && !isPdf) {
-      const imageText = await extractOcrWithTesseract(normalizedDataUrl);
-
-      if (imageText) {
-        rawText = imageText;
-        ocrMethod = 'Tesseract OCR';
-      }
-    }
+    findings = [
+      buildFinding(
+        caseId,
+        'Validation Engine',
+        'Automatic validation could not complete. Human review is required.',
+        'high'
+      )
+    ];
   }
 
-  const detection = detectDocumentType(
-    options.fileName,
-    rawText,
-    mimeType
-  );
+  findings = findings.map((finding) => ({
+    ...finding,
+    case_id: caseId,
+    finding_id: finding.finding_id || newId('finding')
+  }));
 
-  const finalDocumentType: DocumentType =
-    options.documentType === 'auto'
-      ? (aiFields && detection.documentType === 'general_doc'
-          ? detection.documentType
-          : detection.documentType)
-      : options.documentType;
-
-  /*
-   * Schema-specific second pass. This is also performed for scanned PDFs
-   * when the PDF text layer is empty.
-   */
-  if (normalizedDataUrl && !isUnreadable) {
-    const schema = DOCUMENT_SCHEMAS[finalDocumentType];
-    const hasSchemaFields = Boolean(
-      aiFields &&
-      schema.fields.some((field) =>
-        Object.prototype.hasOwnProperty.call(aiFields, field.name)
+  if (!rawText) {
+    findings.push(
+      buildFinding(
+        caseId,
+        'Text Extraction',
+        'No readable text was extracted. Try a clearer scan or a text-based PDF.',
+        'high'
       )
     );
-
-    if (!hasSchemaFields || options.documentType === 'auto' || isSelectablePdf) {
-      const secondResult = await extractDocumentWithGemini(
-        finalDocumentType,
-        mimeType,
-        normalizedDataUrl,
-        options.fileName
-      );
-
-      if (secondResult) {
-        if (
-          secondResult.rawText.trim().length > rawText.length &&
-          secondResult.rawText.trim().length >= 10
-        ) {
-          rawText = secondResult.rawText.trim();
-          if (!isSelectablePdf) {
-            ocrMethod = isPdf
-              ? 'Scanned PDF OCR (Gemini)'
-              : 'Gemini Image OCR';
-          }
-        }
-
-        if (Object.keys(secondResult.fields).length) {
-          aiFields = secondResult.fields;
-        }
-
-        if (
-          secondResult.isUnreadable &&
-          !rawText &&
-          !Object.keys(secondResult.fields).length
-        ) {
-          isUnreadable = true;
-        }
-      }
-    }
   }
 
-  onStageUpdate?.({
-    stage: 'analyzing',
-    message: 'Analyzing extracted fields...',
-    documentType: finalDocumentType,
-    subMessage: `Document type: ${DOCUMENT_SCHEMAS[finalDocumentType].title}`
-  });
-
-  const schema = DOCUMENT_SCHEMAS[finalDocumentType];
-  const fallbackFields = extractFieldsFromText(
-    finalDocumentType,
-    rawText,
-    options.manualFields
-  );
-
-  const hasAIValues = Boolean(
-    aiFields &&
-    Object.values(aiFields).some((field) => field.value.trim())
-  );
-
-  const hasReadableText = rawText.trim().length >= 10;
-  const ocrFailed = !isUnreadable && !hasReadableText && !hasAIValues;
-
-  let extractedFields: ExtractedField[];
-
-  if (aiFields && hasAIValues) {
-    extractedFields = schema.fields.map((definition) => {
-      const aiField = getAIField(
-        aiFields || {},
-        definition.name,
-        definition.label
-      );
-
-      const fallback = fallbackFields.find(
-        (field) => field.field_name === definition.name
-      );
-
-      const manualValue = options.manualFields?.[definition.name];
-      const aiValue = aiField?.value?.trim() || '';
-      const fallbackValue = fallback?.field_value?.trim() || '';
-
-      const value =
-        manualValue !== undefined
-          ? manualValue
-          : aiValue || fallbackValue;
-
-      const confidence =
-        manualValue !== undefined
-          ? manualValue.trim()
-            ? 0.99
-            : 0
-          : aiValue
-            ? Math.max(0, Math.min(1, aiField?.confidence ?? 0.75))
-            : fallbackValue
-              ? fallback?.confidence ?? 0.75
-              : 0;
-
-      return {
-        field_id: `fld-${caseId}-${definition.name}`,
-        case_id: caseId,
-        field_name: definition.name,
-        field_label: definition.label,
-        field_value: value,
-        confidence,
-        is_uncertain: Boolean(
-          definition.required && (!value.trim() || confidence < 0.65)
-        ),
-        is_edited: manualValue !== undefined
-      };
-    });
-  } else {
-    extractedFields = fallbackFields.map((field) => ({
-      ...field,
-      field_id: `fld-${caseId}-${field.field_name}`,
-      case_id: caseId
-    }));
+  if (documentType === 'unknown') {
+    findings.push(
+      buildFinding(
+        caseId,
+        'Document Type Classification',
+        'The document could not be classified automatically. A human reviewer must determine its type.',
+        'medium'
+      )
+    );
   }
 
-  if (ocrFailed || isUnreadable) {
-    extractedFields = schema.fields.map((definition) => {
-      const manualValue = options.manualFields?.[definition.name] || '';
+  let decision: {
+    status: CaseRecord['status'];
+    assignedQueue: CaseRecord['assigned_queue'];
+    routingReason: string;
+  };
 
-      return {
-        field_id: `fld-${caseId}-${definition.name}`,
-        case_id: caseId,
-        field_name: definition.name,
-        field_label: definition.label,
-        field_value: manualValue,
-        confidence: manualValue ? 0.99 : 0,
-        is_uncertain: Boolean(definition.required && !manualValue),
-        is_edited: Boolean(manualValue)
-      };
-    });
+  try {
+    decision = evaluateAndRoute(
+      findings,
+      Boolean(!rawText || documentType === 'unknown')
+    );
+  } catch {
+    decision = {
+      status: 'Needs More Information',
+      assignedQueue: 'Missing Information',
+      routingReason: 'Automatic routing could not finish; manual review is required.'
+    };
   }
 
-  onStageUpdate?.({
-    stage: 'validating',
-    message: 'Validating extracted information...',
-    subMessage: 'Running deterministic validation rules'
-  });
+  if (!rawText || documentType === 'unknown') {
+    decision = {
+      status: 'Needs More Information',
+      assignedQueue: 'Missing Information',
+      routingReason: !rawText
+        ? 'No usable text was extracted. Request a clearer or supported document file.'
+        : 'Document type is uncertain and requires human classification.'
+    };
+  }
 
-  const findings: ValidationFinding[] = isUnreadable
-    ? [
-        {
-          finding_id: `find-unreadable-${caseId}`,
-          case_id: caseId,
-          check_name: 'Document Readability',
-          category: 'format_error',
-          result: 'failed',
-          severity: 'high',
-          explanation:
-            'The document appears unreadable or corrupted. Manual review is required.',
-          evidence_reference: `File: ${options.fileName}`,
-          resolved: false
-        }
-      ]
-    : runValidationChecks(
-        finalDocumentType,
-        extractedFields,
-        options.crossReferenceText
-      );
+  const trace: AgentStepTrace[] = [
+    createTrace(
+      'File Validation',
+      'Check file extension, size and signature',
+      'completed',
+      'File passed initial validation.'
+    ),
+    createTrace(
+      'Multimodal Text Extraction',
+      'Read text from the uploaded PDF or image',
+      rawText ? 'completed' : 'failed',
+      rawText
+        ? `Extracted ${rawText.length} characters using ${extraction.method}.`,
+        Date.now() - started
+      : `No readable text returned. Method: ${extraction.method}.`,
+      Date.now() - started
+    ),
+    createTrace(
+      'Document Classification',
+      'Identify the likely document category',
+      documentType === 'unknown' ? 'failed' : 'completed',
+      `Detected type: ${documentType}.`
+    ),
+    createTrace(
+      'Schema Field Extraction',
+      'Extract structured fields from document content',
+      extractedFields.length ? 'completed' : 'failed',
+      `${extractedFields.length} field(s) extracted.`
+    ),
+    createTrace(
+      'Validation Engine',
+      'Check extracted data for missing information',
+      'completed',
+      `${findings.length} finding(s) generated.`
+    ),
+    createTrace(
+      'Decision and Routing',
+      'Route the case to the appropriate review queue',
+      'completed',
+      decision.routingReason
+    )
+  ].map((item, index) => ({ ...item, step_number: index + 1 }));
 
-  for (const finding of findings) finding.case_id = caseId;
-
-  const decision = evaluateAndRoute(
-    findings,
-    isUnreadable,
-    finalDocumentType
-  );
-
-  const trace = buildAgentTrace(
-    finalDocumentType,
-    options.fileName,
-    extractedFields.filter((field) => Boolean(field.field_value.trim())).length,
-    findings.length,
-    decision,
-    { isUnreadable, ocrFailed, ocrMethod }
-  );
-
-  const executiveSummary = generateNeutralSummary(
-    finalDocumentType,
+  let summary = summarizeCase(
+    documentType,
     decision.status,
     decision.assignedQueue,
     findings,
-    extractedFields
+    extractedFields,
+    rawText
   );
 
-  const auditEvents: AuditEvent[] = [
-    {
-      event_id: `evt-${caseId}-created`,
-      case_id: caseId,
-      event_type: 'CASE_CREATED',
-      actor: 'System',
-      summary: `Document submitted: ${sanitizeFileName(options.fileName)}.`,
-      details: `MIME: ${mimeType}; size: ${options.fileSizeKb} KB.`,
-      created_at: now
-    },
-    {
-      event_id: `evt-${caseId}-extraction`,
-      case_id: caseId,
-      event_type: ocrFailed ? 'OCR_EXTRACTION_FAILED' : 'TEXT_EXTRACTED',
-      actor: 'AI Agent',
-      summary: ocrFailed
-        ? 'OCR did not recover readable text or structured fields.'
-        : `Extraction method: ${ocrMethod}; text length: ${rawText.length}.`,
-      created_at: new Date(Date.now() + 100).toISOString()
-    },
-    {
-      event_id: `evt-${caseId}-validation`,
-      case_id: caseId,
-      event_type: 'VALIDATION_RUN',
-      actor: 'AI Agent',
-      summary: `Validation completed with ${findings.length} findings.`,
-      created_at: new Date(Date.now() + 200).toISOString()
-    },
-    {
-      event_id: `evt-${caseId}-routing`,
-      case_id: caseId,
-      event_type: 'ROUTING_DECIDED',
-      actor: 'AI Agent',
-      summary: `Case routed to ${decision.assignedQueue} with status ${decision.status}.`,
-      details: decision.routingReason,
-      created_at: new Date(Date.now() + 300).toISOString()
-    }
-  ];
-
-  let consentRecordObj:
-    | import('../src/shared/types.ts').ConsentRecord
-    | undefined;
-
-  if (options.consentRecord) {
-    consentRecordObj = {
-      consent_id: `consent-${caseId}`,
-      notice_version: options.consentRecord.notice_version || '2026.1',
-      timestamp: options.consentRecord.timestamp || now,
-      purpose:
-        options.consentRecord.purpose ||
-        'document_validation_and_review',
-      legal_basis: options.consentRecord.legal_basis || 'consent',
-      affirmative_action: Boolean(options.consentRecord.affirmative_action),
-      user_declaration: Boolean(options.consentRecord.user_declaration),
-      withdrawn: false
-    };
-
-    auditEvents.push({
-      event_id: `evt-${caseId}-consent`,
-      case_id: caseId,
-      event_type: 'CONSENT_RECORDED',
-      actor: 'Data Principal',
-      summary: 'Consent record captured for document processing.',
-      details: `Notice version: ${consentRecordObj.notice_version}`,
-      created_at: now
-    });
-  }
-
-  const caseRecord: CaseRecord = {
-    case_id: caseId,
-    case_number: caseNumber,
-    version: 1,
-    document_type: finalDocumentType,
-    file_name: sanitizeFileName(options.fileName),
-    file_size_kb: options.fileSizeKb,
-    file_mime: mimeType,
-    file_data_url: normalizedDataUrl,
-    raw_text: rawText || (ocrFailed ? '[NO OCR TEXT RECOVERED]' : ''),
-    cross_reference_file_name: options.crossReferenceFileName,
-    cross_reference_text: options.crossReferenceText,
-    is_selectable_pdf: isSelectablePdf,
-    extraction_method: ocrMethod,
-    classification_reason: detection.reason,
-    detected_document_type: detection.documentType,
-    created_at: now,
-    updated_at: now,
+  const record: CaseRecord = {
+    ...base,
+    document_type: documentType,
+    detected_document_type: documentType,
+    raw_text: rawText,
+    extraction_method: extraction.method,
+    classification_reason: documentType === 'unknown'
+      ? 'The extracted content did not provide enough evidence for automatic classification.'
+      : `Classification was based on extracted text and document patterns.`,
     status: decision.status,
     assigned_queue: decision.assignedQueue,
     routing_reason: decision.routingReason,
-    executive_summary: executiveSummary,
-    processing_error: isUnreadable
-      ? 'Document unreadable'
-      : ocrFailed
-        ? 'No readable text or structured fields were extracted'
-        : undefined,
+    executive_summary: summary,
     extracted_fields: extractedFields,
     validation_findings: findings,
-    review_actions: [],
-    audit_events: auditEvents,
+    audit_events: [
+      makeAudit(caseId, 'CASE_CREATED', 'Document case created.'),
+      makeAudit(
+        caseId,
+        rawText ? 'TEXT_EXTRACTED' : 'OCR_EXTRACTION_FAILED',
+        rawText ? 'Document text extracted.' : 'No readable document text extracted.',
+        `${extraction.method}; ${rawText.length} characters.`
+      ),
+      makeAudit(
+        caseId,
+        'DOCUMENT_TYPE_DETECTED',
+        `Document type: ${documentType}.`,
+        recordClassificationReason(documentType)
+      ),
+      makeAudit(
+        caseId,
+        'VALIDATION_RUN',
+        'Document validation completed.',
+        `${findings.length} validation finding(s).`
+      ),
+      makeAudit(
+        caseId,
+        'ROUTING_DECIDED',
+        `Case routed to ${decision.assignedQueue}.`,
+        decision.routingReason
+      )
+    ],
     agent_trace: trace,
-    consent_record: consentRecordObj,
-    retention_until: new Date(
-      Date.now() + 90 * 24 * 60 * 60 * 1000
-    ).toISOString(),
-    is_purged: false
+    updated_at: new Date().toISOString()
   };
 
-  caseStore.add(caseRecord);
+  try {
+    caseStore.create(record);
+  } catch (error) {
+    log.error(
+      'Failed to persist case',
+      error instanceof Error ? error.message : String(error)
+    );
+    throw error;
+  }
 
-  onStageUpdate?.({
-    stage: 'ready',
-    message: 'Processing complete.',
-    subMessage: `Case ${caseNumber} routed to ${decision.assignedQueue}`
+  emit('complete', 'Document processing complete', {
+    caseId,
+    documentType,
+    status: record.status,
+    assignedQueue: record.assigned_queue,
+    extractedFields: record.extracted_fields.length
   });
 
-  return caseRecord;
+  return record;
+}
+
+function recordClassificationReason(type: DocumentType): string {
+  return type === 'unknown'
+    ? 'Classification confidence was insufficient.'
+    : `Document content matched the ${type} category.`;
 }
 
 export async function reEvaluateCase(
   caseId: string,
   reviewerLabel = 'Reviewer'
 ): Promise<CaseRecord | undefined> {
-  const existing = caseStore.getById(caseId);
+  const existing = caseStore.get(caseId);
+
   if (!existing) return undefined;
 
-  const findings = runValidationChecks(
-    existing.document_type,
-    existing.extracted_fields,
-    existing.cross_reference_text
-  );
+  let findings = existing.validation_findings || [];
 
-  for (const finding of findings) {
-    const previous = existing.validation_findings.find(
-      (item) => item.check_name === finding.check_name
+  try {
+    findings = runValidationChecks(
+      existing.document_type,
+      existing.extracted_fields,
+      existing.raw_text || ''
+    ) || [];
+  } catch (error) {
+    log.error(
+      'Re-evaluation validation failed',
+      error instanceof Error ? error.message : String(error)
     );
-
-    if (previous?.resolved) {
-      finding.resolved = true;
-      finding.resolution_notes = previous.resolution_notes;
-    }
   }
 
-  const decision = evaluateAndRoute(
-    findings,
-    Boolean(existing.processing_error),
-    existing.document_type
-  );
+  if (!existing.raw_text?.trim()) {
+    findings.push(
+      buildFinding(
+        caseId,
+        'Text Extraction',
+        'No readable text was extracted. Human review is required.',
+        'high'
+      )
+    );
+  }
 
-  const updatedTrace = buildAgentTrace(
-    existing.document_type,
-    existing.file_name,
-    existing.extracted_fields.filter((field) => Boolean(field.field_value)).length,
-    findings.length,
-    decision,
-    {
-      isUnreadable: Boolean(existing.processing_error),
-      ocrFailed: Boolean(existing.processing_error),
-      ocrMethod: 'Human Verified & Re-evaluated'
-    }
-  );
+  if (existing.document_type === 'unknown') {
+    findings.push(
+      buildFinding(
+        caseId,
+        'Document Type Classification',
+        'The document type remains unknown and requires manual classification.'
+      )
+    );
+  }
 
-  const summary = generateNeutralSummary(
+  let decision: {
+    status: CaseRecord['status'];
+    assignedQueue: CaseRecord['assigned_queue'];
+    routingReason: string;
+  };
+
+  try {
+    decision = evaluateAndRoute(
+      findings,
+      Boolean(existing.processing_error || !existing.raw_text?.trim())
+    );
+  } catch {
+    decision = {
+      status: 'Needs More Information',
+      assignedQueue: 'Missing Information',
+      routingReason: 'Manual review is required because automated re-evaluation failed.'
+    };
+  }
+
+  const summary = summarizeCase(
     existing.document_type,
     decision.status,
     decision.assignedQueue,
     findings,
-    existing.extracted_fields
+    existing.extracted_fields,
+    existing.raw_text || ''
   );
 
-  return caseStore.update(caseId, (record) => {
-    const audit: AuditEvent = {
-      event_id: `evt-${caseId}-${Date.now()}`,
-      case_id: caseId,
-      event_type: 'AGENT_RE_EVALUATED',
-      actor: 'AI Agent',
-      summary: `Automated re-evaluation triggered by ${reviewerLabel}.`,
-      details: decision.routingReason,
-      created_at: new Date().toISOString()
-    };
+  const updatedTrace = [
+    ...(existing.agent_trace || []),
+    createTrace(
+      'Manual Re-evaluation',
+      `Re-evaluate case requested by ${reviewerLabel}`,
+      'completed',
+      `Status: ${decision.status}; queue: ${decision.assignedQueue}.`
+    )
+  ].map((item, index) => ({ ...item, step_number: index + 1 }));
+
+  return caseStore.update(caseId, (current) => {
+    const audit = makeAudit(
+      caseId,
+      'AGENT_RE_EVALUATED',
+      `Case re-evaluated by ${reviewerLabel}.`,
+      `Status: ${decision.status}; queue: ${decision.assignedQueue}.`
+    );
 
     return {
-      ...record,
+      ...current,
       status: decision.status,
       assigned_queue: decision.assignedQueue,
       routing_reason: decision.routingReason,
       validation_findings: findings,
       executive_summary: summary,
       agent_trace: updatedTrace,
-      audit_events: [audit, ...record.audit_events]
+      audit_events: [audit, ...(current.audit_events || [])],
+      updated_at: new Date().toISOString(),
+      version: (current.version || 0) + 1
     };
   });
 }
