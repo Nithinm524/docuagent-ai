@@ -821,15 +821,14 @@ export async function runAgentPipeline(
       'File passed initial validation.'
     ),
     createTrace(
-      'Multimodal Text Extraction',
-      'Read text from the uploaded PDF or image',
-      rawText ? 'completed' : 'failed',
-      rawText
-        ? `Extracted ${rawText.length} characters using ${extraction.method}.`,
-        Date.now() - started
-      : `No readable text returned. Method: ${extraction.method}.`,
-      Date.now() - started
-    ),
+  'Multimodal Text Extraction',
+  'Read text from the uploaded PDF or image',
+  rawText ? 'completed' : 'failed',
+  rawText
+    ? `Extracted ${rawText.length} characters using ${extraction.method}.`
+    : `No readable text returned. Method: ${extraction.method}.`,
+  Date.now() - started
+),
     createTrace(
       'Document Classification',
       'Identify the likely document category',
