@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -32,6 +32,7 @@ import {
   ReviewerQueue
 } from '../shared/types.ts';
 import { DOCUMENT_SCHEMAS } from '../shared/validation.ts';
+import { downloadCasePdfReport } from '../utils/pdfReportGenerator.ts';
 
 interface CaseDetailViewProps {
   caseData: CaseRecord;
@@ -79,9 +80,186 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSavingFinding, setIsSavingFinding] = useState(false);
 
-  // Review Action Drawer
-  const [actionNotes, setActionNotes] = useState('');
+  // Review Decision Panel State
+  type DecisionType = 'approve_ready' | 'request_info' | 'escalate_priority' | null;
+  const [selectedDecision, setSelectedDecision] = useState<DecisionType>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Initialize notes from draft in localStorage, or previously saved notes on the case
+  const getInitialNotes = () => {
+    try {
+      const draft = localStorage.getItem(`reviewer_notes_${caseData.case_id}`);
+      if (draft !== null && draft !== undefined && draft.trim()) return draft;
+    } catch {}
+    return caseData.reviewer_decision?.notes || '';
+  };
+  const [actionNotes, setActionNotes] = useState<string>(getInitialNotes);
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
+
+  // When active case changes, load draft or previously saved notes
+  useEffect(() => {
+    try {
+      const draft = localStorage.getItem(`reviewer_notes_${caseData.case_id}`);
+      if (draft !== null && draft !== undefined && draft.trim()) {
+        setActionNotes(draft);
+        return;
+      }
+    } catch {}
+    setActionNotes(caseData.reviewer_decision?.notes || '');
+    setSelectedDecision(null);
+    setValidationError(null);
+    setActionSuccessMessage(null);
+  }, [caseData.case_id, caseData.reviewer_decision?.notes]);
+
+  // Persist notes changes to localStorage draft
+  const handleNotesChange = (val: string) => {
+    setActionNotes(val);
+    setValidationError(null);
+    setActionSuccessMessage(null);
+    try {
+      localStorage.setItem(`reviewer_notes_${caseData.case_id}`, val);
+    } catch {}
+  };
+
+  // Inspect document mandatory fields and required check status
+  const docSchema = DOCUMENT_SCHEMAS[caseData.document_type];
+  const missingMandatoryFields = useMemo(() => {
+    if (!docSchema) return [];
+    return docSchema.fields.filter((f) => {
+      if (!f.required) return false;
+      const matched = caseData.extracted_fields.find((ef) => ef.field_name === f.name);
+      return !matched || !matched.field_value || !matched.field_value.trim();
+    });
+  }, [docSchema, caseData.extracted_fields]);
+
+  const unresolvedFatalFindings = useMemo(() => {
+    return caseData.validation_findings.filter(
+      (f) =>
+        !f.resolved &&
+        f.result === 'failed' &&
+        (f.category === 'missing_information' || (f.category === 'format_error' && f.severity === 'high'))
+    );
+  }, [caseData.validation_findings]);
+
+  // Selecting a decision option
+  const handleSelectDecision = (decision: 'approve_ready' | 'request_info' | 'escalate_priority') => {
+    setSelectedDecision(decision);
+    setValidationError(null);
+    setActionSuccessMessage(null);
+
+    if (decision === 'approve_ready') {
+      if (missingMandatoryFields.length > 0) {
+        setValidationError(
+          `Cannot mark ready: Mandatory field(s) missing: ${missingMandatoryFields.map((f) => f.label).join(', ')}. Complete fields or resolve findings first.`
+        );
+      } else if (unresolvedFatalFindings.length > 0) {
+        setValidationError(
+          `Cannot mark ready: Unresolved required checks: ${unresolvedFatalFindings.map((f) => f.check_name).join(', ')}.`
+        );
+      }
+    } else if (decision === 'request_info') {
+      if (!actionNotes.trim() && missingMandatoryFields.length > 0) {
+        const suggestion = `Missing required information: ${missingMandatoryFields.map((f) => f.label).join(', ')}. Please submit updated document.`;
+        handleNotesChange(suggestion);
+      }
+    }
+  };
+
+  // Finalize & Complete Review Confirmation
+  const handleFinalizeDecision = async () => {
+    setValidationError(null);
+    setActionSuccessMessage(null);
+
+    // 1. Verify decision selected
+    if (!selectedDecision) {
+      setValidationError('Please select a review decision (Mark Ready, Request Missing Information, or Escalate) before finalizing.');
+      return;
+    }
+
+    // 2. Validate Mark Ready for Review
+    if (selectedDecision === 'approve_ready') {
+      if (missingMandatoryFields.length > 0) {
+        setValidationError(
+          `Cannot mark ready: Mandatory field(s) missing: ${missingMandatoryFields.map((f) => f.label).join(', ')}. Incomplete documents cannot be approved.`
+        );
+        return;
+      }
+      if (unresolvedFatalFindings.length > 0) {
+        setValidationError(
+          `Cannot mark ready: Unresolved required validation checks: ${unresolvedFatalFindings.map((f) => f.check_name).join(', ')}.`
+        );
+        return;
+      }
+    }
+
+    // 3. Validate Request Missing Information notes
+    if (selectedDecision === 'request_info') {
+      if (!actionNotes.trim()) {
+        setValidationError('Please enter Reviewer Notes describing what missing information is required before finalizing.');
+        return;
+      }
+    }
+
+    // 4. Validate Escalate to Priority Review notes
+    if (selectedDecision === 'escalate_priority') {
+      if (!actionNotes.trim()) {
+        setValidationError('Please enter Reviewer Notes providing an escalation reason before finalizing.');
+        return;
+      }
+    }
+
+    // 5. Submit to backend
+    setIsSubmittingAction(true);
+    try {
+      const targetQueue: ReviewerQueue =
+        selectedDecision === 'approve_ready'
+          ? 'General Review'
+          : selectedDecision === 'request_info'
+          ? 'Missing Information'
+          : 'Priority Review';
+
+      const targetStatus: CaseStatus =
+        selectedDecision === 'approve_ready'
+          ? 'Ready for Review'
+          : selectedDecision === 'request_info'
+          ? 'Needs More Information'
+          : 'Priority Review';
+
+      await onReviewAction(selectedDecision, actionNotes.trim(), targetQueue, targetStatus);
+
+      // Clean up draft in localStorage
+      try {
+        localStorage.removeItem(`reviewer_notes_${caseData.case_id}`);
+      } catch {}
+
+      const successLabels: Record<string, string> = {
+        approve_ready: 'Case marked Ready for Review and routed to General Review.',
+        request_info: 'Missing Information requested. Case routed to Missing Information queue.',
+        escalate_priority: 'Case successfully escalated to Priority Review queue.'
+      };
+      setActionSuccessMessage(successLabels[selectedDecision] || 'Reviewer decision recorded successfully.');
+      setStatusAnnouncement('Reviewer decision saved successfully.');
+    } catch (err: any) {
+      // Preserve notes & decision so reviewer can adjust and retry!
+      setValidationError(err.message || 'Failed to record reviewer decision. Please try again.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const handleAction = async (action: string, newQueue?: ReviewerQueue, newStatus?: CaseStatus) => {
+    setIsSubmittingAction(true);
+    setValidationError(null);
+    try {
+      await onReviewAction(action, actionNotes, newQueue, newStatus);
+      setStatusAnnouncement('Case review finalized.');
+    } catch (err: any) {
+      setValidationError(err.message || 'Action failed.');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
 
   const openEditField = (field: ExtractedField) => {
     setEditingField(field);
@@ -101,6 +279,15 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
     }
   };
 
+  const handleDownloadPdfReport = () => {
+    try {
+      downloadCasePdfReport(caseData);
+      setStatusAnnouncement(`Official PDF screening report for ${caseData.case_number} downloaded.`);
+    } catch (err) {
+      console.error('Failed to generate PDF report:', err);
+    }
+  };
+
   const handleSaveFinding = async () => {
     if (!resolvingFinding) return;
     setIsSavingFinding(true);
@@ -112,18 +299,6 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
       console.error(err);
     } finally {
       setIsSavingFinding(false);
-    }
-  };
-
-  const handleAction = async (action: string, newQueue?: ReviewerQueue, newStatus?: CaseStatus) => {
-    setIsSubmittingAction(true);
-    try {
-      await onReviewAction(action, actionNotes, newQueue, newStatus);
-      setActionNotes('');
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSubmittingAction(false);
     }
   };
 
@@ -242,11 +417,22 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
 
           <button
             type="button"
+            onClick={handleDownloadPdfReport}
+            className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400 text-white dark:text-slate-950 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-xs cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500"
+            title="Download official PDF report containing case details, extracted fields, validation findings, and reviewer decisions"
+          >
+            <Download className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Download Report</span>
+          </button>
+
+          <button
+            type="button"
             onClick={onOpenReport}
             className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500"
+            title="Open interactive screening report modal"
           >
-            <Printer className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
-            <span>Download Report</span>
+            <FileText className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+            <span>View Report</span>
           </button>
 
           {(onDeleteCase || onPurgeCaseData) && (
@@ -564,63 +750,288 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
           {/* Right 1 Col: Reviewer Action Panel */}
           <div className="space-y-6">
             <div className="bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-2">
-                <UserCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                <span>Reviewer Decision Panel</span>
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center space-x-2">
+                  <UserCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                  <span>Reviewer Decision Panel</span>
+                </h3>
+                {selectedDecision && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800">
+                    Decision Selected
+                  </span>
+                )}
+              </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  Reviewer Notes / Rationale
+              {/* Previously Saved Decision Card (When Reopening or Viewing Case) */}
+              {caseData.reviewer_decision && (
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center space-x-1.5">
+                      <ShieldCheck className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span>Saved Decision: {caseData.reviewer_decision.selected_decision}</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                      {new Date(caseData.reviewer_decision.reviewed_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 dark:text-slate-400 flex flex-wrap gap-x-3 gap-y-1">
+                    <span>Reviewer: <strong className="text-slate-800 dark:text-slate-200">{caseData.reviewer_decision.reviewed_by}</strong></span>
+                    <span>Status: <strong className="text-slate-800 dark:text-slate-200">{caseData.reviewer_decision.previous_status} → {caseData.reviewer_decision.new_status}</strong></span>
+                  </div>
+                  {caseData.reviewer_decision.action === 'request_info' ? (
+                    <div className="p-2 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-300 text-[11px]">
+                      <strong>Requested Information from Submitter:</strong>
+                      <p className="mt-0.5 text-amber-800 dark:text-amber-200 italic font-mono">{caseData.reviewer_decision.notes}</p>
+                    </div>
+                  ) : caseData.reviewer_decision.action === 'escalate_priority' ? (
+                    <div className="p-2 rounded bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/60 text-rose-900 dark:text-rose-300 text-[11px]">
+                      <strong>Escalation Justification:</strong>
+                      <p className="mt-0.5 text-rose-800 dark:text-rose-200 italic font-mono">{caseData.reviewer_decision.notes}</p>
+                    </div>
+                  ) : (
+                    <div className="p-2 rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 text-[11px]">
+                      <strong>Reviewer Rationale:</strong>
+                      <p className="mt-0.5 italic">{caseData.reviewer_decision.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Decision Selection Options */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Select Decision:
                 </label>
+
+                {/* 1. Mark Ready for Review */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectDecision('approve_ready')}
+                  disabled={isSubmittingAction || isProcessing}
+                  className={`w-full p-2.5 rounded-xl border text-left text-xs font-semibold transition-all cursor-pointer flex items-center justify-between ${
+                    selectedDecision === 'approve_ready'
+                      ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 ring-2 ring-emerald-500/50 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <div className={`p-1.5 rounded-lg ${
+                      selectedDecision === 'approve_ready' ? 'bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}>
+                      <Check className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold">Mark Ready for Review</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                        Validates mandatory fields and routes to General Review queue
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    selectedDecision === 'approve_ready'
+                      ? 'border-emerald-600 bg-emerald-600 text-white'
+                      : 'border-slate-300 dark:border-slate-600'
+                  }`}>
+                    {selectedDecision === 'approve_ready' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </div>
+                </button>
+
+                {/* 2. Request Missing Information */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectDecision('request_info')}
+                  disabled={isSubmittingAction || isProcessing}
+                  className={`w-full p-2.5 rounded-xl border text-left text-xs font-semibold transition-all cursor-pointer flex items-center justify-between ${
+                    selectedDecision === 'request_info'
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 ring-2 ring-amber-500/50 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <div className={`p-1.5 rounded-lg ${
+                      selectedDecision === 'request_info' ? 'bg-amber-200 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}>
+                      <HelpCircle className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold">Request Missing Information</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                        Flags deficiencies and moves case to Missing Information queue
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    selectedDecision === 'request_info'
+                      ? 'border-amber-600 bg-amber-600 text-white'
+                      : 'border-slate-300 dark:border-slate-600'
+                  }`}>
+                    {selectedDecision === 'request_info' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </div>
+                </button>
+
+                {/* 3. Escalate to Priority Review */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectDecision('escalate_priority')}
+                  disabled={isSubmittingAction || isProcessing}
+                  className={`w-full p-2.5 rounded-xl border text-left text-xs font-semibold transition-all cursor-pointer flex items-center justify-between ${
+                    selectedDecision === 'escalate_priority'
+                      ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 ring-2 ring-rose-500/50 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2.5">
+                    <div className={`p-1.5 rounded-lg ${
+                      selectedDecision === 'escalate_priority' ? 'bg-rose-200 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}>
+                      <AlertOctagon className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="font-bold">Escalate to Priority Review</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
+                        Elevates case priority to High and flags for expedited triage
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                    selectedDecision === 'escalate_priority'
+                      ? 'border-rose-600 bg-rose-600 text-white'
+                      : 'border-slate-300 dark:border-slate-600'
+                  }`}>
+                    {selectedDecision === 'escalate_priority' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                  </div>
+                </button>
+              </div>
+
+              {/* Contextual Guidance / Pre-validation Box */}
+              {selectedDecision === 'approve_ready' && (
+                <div className={`p-3 rounded-xl text-xs border ${
+                  missingMandatoryFields.length > 0 || unresolvedFatalFindings.length > 0
+                    ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200'
+                }`}>
+                  {missingMandatoryFields.length > 0 ? (
+                    <div className="space-y-1">
+                      <div className="font-bold flex items-center space-x-1.5 text-amber-800 dark:text-amber-300">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Missing Mandatory Information:</span>
+                      </div>
+                      <p className="text-[11px]">
+                        The following required fields must be present: <strong>{missingMandatoryFields.map((f) => f.label).join(', ')}</strong>.
+                        Incomplete documents cannot be marked ready.
+                      </p>
+                    </div>
+                  ) : unresolvedFatalFindings.length > 0 ? (
+                    <div className="space-y-1">
+                      <div className="font-bold flex items-center space-x-1.5 text-amber-800 dark:text-amber-300">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>Unresolved Validation Findings:</span>
+                      </div>
+                      <p className="text-[11px]">
+                        Required checks need resolution: <strong>{unresolvedFatalFindings.map((f) => f.check_name).join(', ')}</strong>.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1.5 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span>All required schema fields and validation rules verified. Ready to finalize.</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedDecision === 'request_info' && (
+                <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs space-y-1.5">
+                  <div className="font-bold flex items-center space-x-1.5 text-amber-800 dark:text-amber-300">
+                    <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>Missing Information Instructions:</span>
+                  </div>
+                  <p className="text-[11px]">
+                    Detail below what documentation, legibility correction, or missing fields are required from the submitter.
+                  </p>
+                  {missingMandatoryFields.length > 0 && (
+                    <div className="text-[10px] text-amber-800 dark:text-amber-300 font-mono">
+                      Empty Mandatory Fields: {missingMandatoryFields.map((f) => f.label).join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedDecision === 'escalate_priority' && (
+                <div className="p-3 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 text-rose-900 dark:text-rose-200 text-xs space-y-1">
+                  <div className="font-bold flex items-center space-x-1.5 text-rose-800 dark:text-rose-300">
+                    <AlertOctagon className="w-3.5 h-3.5 shrink-0" />
+                    <span>Priority Escalation Justification:</span>
+                  </div>
+                  <p className="text-[11px]">
+                    Enter an explanation justifying urgent review (e.g., fraud anomaly, VIP applicant, SLA breach risk, or data mismatch).
+                  </p>
+                </div>
+              )}
+
+              {/* Reviewer Notes / Rationale */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Reviewer Notes / Rationale
+                    {(selectedDecision === 'request_info' || selectedDecision === 'escalate_priority') && (
+                      <span className="text-rose-500 font-bold ml-1">*Required</span>
+                    )}
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    {actionNotes.length}/2000
+                  </span>
+                </div>
                 <textarea
                   rows={3}
                   value={actionNotes}
-                  onChange={(e) => setActionNotes(e.target.value)}
-                  placeholder="Record verification notes, submitter outreach comments, or resolution details..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  onChange={(e) => handleNotesChange(e.target.value)}
+                  placeholder={
+                    selectedDecision === 'request_info'
+                      ? 'Describe what specific information or documents are required from the applicant...'
+                      : selectedDecision === 'escalate_priority'
+                      ? 'State the reason for priority escalation (compliance suspicion, high value, or urgency)...'
+                      : 'Record verification notes, rationale, or sign-off details...'
+                  }
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-xs text-slate-900 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
                 />
               </div>
 
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => handleAction('approve_ready', 'General Review', 'Ready for Review')}
-                  disabled={isSubmittingAction}
-                  className="w-full py-2 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-300 dark:border-slate-700 flex items-center justify-center space-x-2 transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                  <span>Mark Ready for Review</span>
-                </button>
+              {/* Validation Error Message */}
+              {validationError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-300 flex items-start space-x-2 animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 font-medium">{validationError}</div>
+                </div>
+              )}
 
-                <button
-                  type="button"
-                  onClick={() => handleAction('request_info', 'Missing Information', 'Needs More Information')}
-                  disabled={isSubmittingAction}
-                  className="w-full py-2 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-300 dark:border-slate-700 flex items-center justify-center space-x-2 transition-colors disabled:opacity-50 cursor-pointer"
-                >
-                  <HelpCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>Request Missing Information</span>
-                </button>
+              {/* Action Success Message */}
+              {actionSuccessMessage && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-300 flex items-start space-x-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 font-medium">{actionSuccessMessage}</div>
+                </div>
+              )}
 
+              {/* Final Confirmation CTA: Finalize & Complete Review */}
+              <div>
                 <button
                   type="button"
-                  onClick={() => handleAction('escalate_priority', 'Priority Review', 'Priority Review')}
-                  disabled={isSubmittingAction}
-                  className="w-full py-2 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold border border-slate-300 dark:border-slate-700 flex items-center justify-center space-x-2 transition-colors disabled:opacity-50 cursor-pointer"
+                  onClick={handleFinalizeDecision}
+                  disabled={isSubmittingAction || isProcessing}
+                  className="w-full py-2.5 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400 text-white dark:text-slate-950 text-xs font-bold shadow-xs flex items-center justify-center space-x-2 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-cyan-500"
                 >
-                  <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-                  <span>Escalate to Priority Review</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleAction('mark_complete', caseData.assigned_queue, 'Review Completed')}
-                  disabled={isSubmittingAction}
-                  className="w-full py-2.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 dark:bg-cyan-500 dark:hover:bg-cyan-400 text-white dark:text-slate-950 text-xs font-bold shadow-xs flex items-center justify-center space-x-2 transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-                  <span>Finalize &amp; Complete Review</span>
+                  {isSubmittingAction ? (
+                    <>
+                      <RotateCw className="w-4 h-4 animate-spin" />
+                      <span>Finalizing Decision...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
+                      <span>Finalize &amp; Complete Review</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -691,35 +1102,54 @@ export const CaseDetailView: React.FC<CaseDetailViewProps> = ({
                       </td>
                       <td className="py-3 px-4 font-mono">
                         {f.field_value ? (
-                          <span className="text-slate-800 dark:text-slate-200">{f.field_value}</span>
+                          <div>
+                            <span className="text-slate-800 dark:text-slate-200">{f.field_value}</span>
+                            {f.source_snippet && (
+                              <div className="text-[10px] text-slate-400 dark:text-slate-500 font-sans mt-0.5 truncate max-w-xs" title={f.source_snippet}>
+                                Evidence: {f.source_snippet}
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <span className="text-slate-400 dark:text-slate-500 italic">[Empty / Unextracted]</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                            Missing Value
+                          </span>
                         )}
                       </td>
                       <td className="py-3 px-4">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-16 bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className={`h-full ${
-                                f.confidence >= 0.8
-                                  ? 'bg-emerald-500'
-                                  : f.confidence >= 0.6
-                                  ? 'bg-amber-500'
-                                  : 'bg-rose-500'
-                              }`}
-                              style={{ width: `${Math.round(f.confidence * 100)}%` }}
-                            />
+                        {f.field_value ? (
+                          <div className="flex items-center space-x-2">
+                            <div className="w-16 bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className={`h-full ${
+                                  f.confidence >= 0.8
+                                    ? 'bg-emerald-500'
+                                    : f.confidence >= 0.6
+                                    ? 'bg-amber-500'
+                                    : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${Math.round(f.confidence * 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                              {Math.round(f.confidence * 100)}%
+                            </span>
                           </div>
-                          <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                            {Math.round(f.confidence * 100)}%
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500 font-mono text-[11px]">
+                            N/A (Missing)
                           </span>
-                        </div>
+                        )}
                       </td>
                       <td className="py-3 px-4">
-                        {f.is_uncertain ? (
+                        {!f.field_value ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700">
+                            Missing Information
+                          </span>
+                        ) : f.is_uncertain ? (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                             <AlertTriangle className="w-3 h-3 mr-1 text-amber-500" />
-                            Uncertain
+                            Uncertain Extraction
                           </span>
                         ) : (
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium text-emerald-700 dark:text-emerald-400">

@@ -3,7 +3,7 @@
  * AI Document Review & Routing Agent
  */
 
-import { SyntheticSampleScenario } from './types.ts';
+import type { SyntheticSampleScenario } from './types.ts';
 
 export const SYNTHETIC_SCENARIOS: SyntheticSampleScenario[] = [
   {

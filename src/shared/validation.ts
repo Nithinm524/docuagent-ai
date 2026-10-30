@@ -243,19 +243,31 @@ export const DOCUMENT_SCHEMAS: Record<DocumentType, { title: string; fields: Fie
         name: 'invoice_number',
         label: 'Invoice Number',
         required: true,
-        type: 'identifier'
+        type: 'identifier',
+        validateFormat: (val) => ({
+          valid: val.trim().length >= 3,
+          reason: 'Invoice number must be at least 3 characters'
+        })
       },
       {
         name: 'vendor_name',
-        label: 'Vendor / Contractor Name',
+        label: 'Vendor Name',
         required: true,
-        type: 'string'
+        type: 'string',
+        validateFormat: (val) => ({
+          valid: val.trim().length >= 2,
+          reason: 'Vendor name must be at least 2 characters'
+        })
       },
       {
         name: 'client_name',
-        label: 'Billed To / Client Name',
+        label: 'Client Name',
         required: true,
-        type: 'string'
+        type: 'string',
+        validateFormat: (val) => ({
+          valid: val.trim().length >= 2,
+          reason: 'Client name must be at least 2 characters'
+        })
       },
       {
         name: 'invoice_date',
@@ -265,13 +277,40 @@ export const DOCUMENT_SCHEMAS: Record<DocumentType, { title: string; fields: Fie
         validateFormat: (val) => validateDateFormat(val)
       },
       {
+        name: 'due_date',
+        label: 'Due Date',
+        required: false,
+        type: 'date',
+        validateFormat: (val) => validateDateFormat(val)
+      },
+      {
+        name: 'subtotal',
+        label: 'Subtotal',
+        required: false,
+        type: 'currency',
+        validateFormat: (val) => ({
+          valid: /[\$\€\£\₹]?[A-Z]{0,3}\s*[0-9,]+(?:\.[0-9]{2})?/.test(val),
+          reason: 'Subtotal must be formatted as currency with valid numeric value'
+        })
+      },
+      {
+        name: 'tax_amount',
+        label: 'Tax / GST',
+        required: false,
+        type: 'currency',
+        validateFormat: (val) => ({
+          valid: /[\$\€\£\₹]?[A-Z]{0,3}\s*[0-9,]+(?:\.[0-9]{2})?/.test(val),
+          reason: 'Tax / GST must be formatted as currency with valid numeric value'
+        })
+      },
+      {
         name: 'total_amount',
-        label: 'Total Payable Amount',
+        label: 'Total Payable',
         required: true,
         type: 'currency',
         validateFormat: (val) => ({
-          valid: /[\$\€\£]?\s*\d+([.,]\d{2})?/.test(val),
-          reason: 'Amount must be formatted as currency with valid numeric value'
+          valid: /[\$\€\£\₹]?[A-Z]{0,3}\s*[0-9,]+(?:\.[0-9]{2})?/.test(val),
+          reason: 'Total payable must be formatted as currency with valid numeric value'
         })
       }
     ]
@@ -442,8 +481,15 @@ export function detectDocumentType(
  */
 export function validateDateFormat(val: string): { valid: boolean; reason?: string } {
   if (!val || !val.trim()) return { valid: false, reason: 'Date value is empty' };
-  const parsed = Date.parse(val.replace(/-/g, '/'));
+  const trimmed = val.trim();
+  const parsed = Date.parse(trimmed.replace(/-/g, '/'));
   if (isNaN(parsed)) {
+    // Try DD/MM/YYYY or DD-MM-YYYY
+    const ddmmyyyy = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+    if (ddmmyyyy) {
+      const p2 = Date.parse(`${ddmmyyyy[3]}/${ddmmyyyy[2]}/${ddmmyyyy[1]}`);
+      if (!isNaN(p2)) return { valid: true };
+    }
     return { valid: false, reason: `Unrecognized date format: "${val}". Expected ISO or standard calendar format.` };
   }
   return { valid: true };
@@ -785,7 +831,9 @@ export function evaluateAndRoute(
   const criticalFormatBreaches = activeFindings.filter(
     (f) => f.category === 'format_error' && f.severity === 'high'
   );
-  const missingInfo = activeFindings.filter((f) => f.category === 'missing_information');
+  const missingRequiredFields = activeFindings.filter(
+    (f) => f.category === 'missing_information' && f.result === 'failed'
+  );
   const warnings = activeFindings.filter((f) => f.result === 'warning');
 
   // Rule 1: Cross-document inconsistency or critical format breach (e.g. expired document) -> Priority Review
@@ -805,9 +853,9 @@ export function evaluateAndRoute(
     };
   }
 
-  // Rule 2: Missing required information or low confidence fields -> Needs More Information
-  if (missingInfo.length > 0) {
-    const missingFieldList = missingInfo.map((m) => m.check_name.replace('Required Field: ', '')).join(', ');
+  // Rule 2: Missing required information -> Needs More Information
+  if (missingRequiredFields.length > 0) {
+    const missingFieldList = missingRequiredFields.map((m) => m.check_name.replace('Required Field: ', '')).join(', ');
     return {
       status: 'Needs More Information',
       assignedQueue: 'Missing Information',

@@ -116,6 +116,16 @@ export function log(entry: Omit<StructuredLog, 'timestamp'>): StructuredLog {
   return fullEntry;
 }
 
+// Attach convenience helper methods
+log.info = (operation: string, message: string, details?: Record<string, any>) =>
+  log({ level: 'INFO', operation, message, details });
+log.warn = (operation: string, message: string, details?: Record<string, any>) =>
+  log({ level: 'WARN', operation, message, details });
+log.error = (operation: string, message: string, errorSummary?: string, details?: Record<string, any>) =>
+  log({ level: 'ERROR', operation, message, errorSummary, details });
+log.debug = (operation: string, message: string, details?: Record<string, any>) =>
+  log({ level: 'DEBUG', operation, message, details });
+
 export function getRecentLogs(limit = 50, level?: LogLevel): StructuredLog[] {
   let filtered = logBuffer;
   if (level) {
@@ -127,3 +137,4 @@ export function getRecentLogs(limit = 50, level?: LogLevel): StructuredLog[] {
 export function clearLogs(): void {
   logBuffer.length = 0;
 }
+

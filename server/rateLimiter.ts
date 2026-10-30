@@ -10,7 +10,7 @@
  * limits should be keyed to authenticated user/session IDs.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { sendError } from './errors.ts';
 import { log } from './logger.ts';
 

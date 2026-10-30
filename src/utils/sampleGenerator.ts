@@ -225,6 +225,290 @@ export function generateSampleGeneralDocPDF(): string {
   ]);
 }
 
+export function generateSampleInvoicePDF(): string {
+  return buildDataUrlPDF([
+    'COMMERCIAL INVOICE',
+    'Invoice Number: INV-1001',
+    'Vendor: ABC Technologies',
+    'Billed To: XYZ Solutions',
+    'Invoice Date: 27 October 2026',
+    'Description: Computer accessories',
+    'Quantity: 10',
+    'Unit Price: 500',
+    'Total Payable Amount: 5000',
+    'Payment Status: Pending'
+  ]);
+}
+
+export function generateSampleInvoiceMissingFieldsPDF(): string {
+  return buildDataUrlPDF([
+    'INVOICE DRAFT - INCOMPLETE INTAKE',
+    'Vendor: ABC Technologies',
+    'Invoice Date: 27 October 2026',
+    'Description: Computer accessories',
+    'Quantity: 10',
+    'Payment Status: Pending'
+    // Note: Missing invoice_number, client_name, total_amount
+  ]);
+}
+
+export function generateSampleInvoicePNG(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 700;
+  const ctx = canvas.getContext('2d')!;
+
+  // Clean white canvas background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 800, 700);
+
+  // Top header bar
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 800, 70);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('ABC TECHNOLOGIES', 30, 44);
+
+  // Title
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('COMMERCIAL INVOICE', 30, 115);
+
+  // Metadata block
+  const drawMeta = (label: string, val: string, x: number, y: number) => {
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(label.toUpperCase(), x, y);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 15px monospace';
+    ctx.fillText(val, x, y + 20);
+  };
+
+  drawMeta('Invoice Number', 'INV-1001', 30, 150);
+  drawMeta('Invoice Date', '27 October 2026', 280, 150);
+  drawMeta('Payment Status', 'Pending', 530, 150);
+
+  // Vendor & Client Cards
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(30, 205, 350, 105);
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(30, 205, 350, 105);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('VENDOR / CONTRACTOR', 45, 230);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('ABC Technologies', 45, 255);
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText('100 Enterprise Way, Suite 400', 45, 276);
+  ctx.fillText('San Francisco, CA 94105', 45, 295);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(420, 205, 350, 105);
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(420, 205, 350, 105);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('BILLED TO / CLIENT NAME', 435, 230);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('XYZ Solutions', 435, 255);
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#475569';
+  ctx.fillText('75 Innovation Drive, Floor 12', 435, 276);
+  ctx.fillText('Austin, TX 78701', 435, 295);
+
+  // Line items table header
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(30, 335, 740, 32);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText('DESCRIPTION', 45, 356);
+  ctx.fillText('QUANTITY', 450, 356);
+  ctx.fillText('UNIT PRICE', 560, 356);
+  ctx.fillText('TOTAL', 680, 356);
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Computer accessories', 45, 395);
+  ctx.fillText('10', 475, 395);
+  ctx.fillText('500', 580, 395);
+  ctx.fillText('5000', 690, 395);
+
+  ctx.beginPath();
+  ctx.moveTo(30, 420);
+  ctx.lineTo(770, 420);
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.stroke();
+
+  // Summary amounts
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(460, 450, 310, 50);
+  ctx.strokeStyle = '#0284c7';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(460, 450, 310, 50);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('Total Payable Amount:', 475, 482);
+  ctx.font = 'bold 18px monospace';
+  ctx.fillStyle = '#0284c7';
+  ctx.fillText('5000', 690, 482);
+
+  return canvas.toDataURL('image/png');
+}
+
+export function generateSampleInvoiceJPEG(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 700;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 800, 700);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 800, 70);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('ABC TECHNOLOGIES', 30, 44);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('COMMERCIAL INVOICE', 30, 115);
+
+  const drawMeta = (label: string, val: string, x: number, y: number) => {
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(label.toUpperCase(), x, y);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 15px monospace';
+    ctx.fillText(val, x, y + 20);
+  };
+
+  drawMeta('Invoice Number', 'INV-1001', 30, 150);
+  drawMeta('Invoice Date', '27 October 2026', 280, 150);
+  drawMeta('Payment Status', 'Pending', 530, 150);
+
+  // Vendor & Client Cards
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(30, 205, 350, 105);
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(30, 205, 350, 105);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('VENDOR / CONTRACTOR', 45, 230);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('ABC Technologies', 45, 255);
+
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(420, 205, 350, 105);
+  ctx.strokeStyle = '#e2e8f0';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(420, 205, 350, 105);
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('BILLED TO / CLIENT NAME', 435, 230);
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('XYZ Solutions', 435, 255);
+
+  // Line items
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(30, 335, 740, 32);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText('DESCRIPTION', 45, 356);
+  ctx.fillText('QUANTITY', 450, 356);
+  ctx.fillText('UNIT PRICE', 560, 356);
+  ctx.fillText('TOTAL', 680, 356);
+
+  ctx.fillStyle = '#334155';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Computer accessories', 45, 395);
+  ctx.fillText('10', 475, 395);
+  ctx.fillText('500', 580, 395);
+  ctx.fillText('5000', 690, 395);
+
+  // Total
+  ctx.fillStyle = '#f1f5f9';
+  ctx.fillRect(460, 450, 310, 50);
+  ctx.strokeStyle = '#0284c7';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(460, 450, 310, 50);
+
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('Total Payable Amount:', 475, 482);
+  ctx.font = 'bold 18px monospace';
+  ctx.fillStyle = '#0284c7';
+  ctx.fillText('5000', 690, 482);
+
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+export function generateSampleNonInvoicePNG(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 500;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, 800, 500);
+
+  // Title
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('SYSTEM ARCHITECTURE OVERVIEW', 40, 50);
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('Technical infrastructure diagram (Non-Invoice Specimen)', 40, 80);
+
+  // Diagram boxes
+  const drawBox = (title: string, x: number, y: number, w: number, h: number) => {
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#0284c7';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(title, x + 20, y + 35);
+  };
+
+  drawBox('API Gateway', 60, 150, 180, 60);
+  drawBox('Worker Service', 310, 150, 180, 60);
+  drawBox('Persistent Store', 560, 150, 180, 60);
+
+  // Connectors
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(240, 180);
+  ctx.lineTo(310, 180);
+  ctx.moveTo(490, 180);
+  ctx.lineTo(560, 180);
+  ctx.stroke();
+
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Notice: This schematic contains purely architectural topology without any billing elements.', 40, 450);
+
+  return canvas.toDataURL('image/png');
+}
+
 export function generateSampleScannedPDF(): string {
   // Scanned PDF with no digital text stream (simulating pure raster/flat PDF)
   const emptyStream = 'q Q';

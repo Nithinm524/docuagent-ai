@@ -10,7 +10,7 @@
  */
 
 import { AppError } from './errors.ts';
-import { DocumentType, ReviewerQueue, CaseStatus, ReviewAction } from '../src/shared/types.ts';
+import type { DocumentType, ReviewerQueue, CaseStatus, ReviewAction } from '../src/shared/types.ts';
 
 const VALID_DOC_TYPES: DocumentType[] = [
   'passport',
@@ -95,7 +95,7 @@ export function validateFieldUpdateBody(body: any): { reviewedValue: string } {
     throw new AppError('INVALID_REQUEST_BODY', 400, 'Request body must be a JSON object.');
   }
 
-  const allowedKeys = ['reviewedValue', 'reviewed_value'];
+  const allowedKeys = ['reviewedValue', 'reviewed_value', 'reviewer', 'reviewerLabel', 'reviewer_label', 'expectedVersion', 'expected_version'];
   for (const key of Object.keys(body)) {
     if (!allowedKeys.includes(key)) {
       throw new AppError('TAMPERING_DETECTED', 400, `Unauthorized field "${key}". Only "reviewedValue" may be submitted.`);
@@ -122,7 +122,7 @@ export function validateFindingResolutionBody(body: any): { resolved: boolean; n
     throw new AppError('INVALID_REQUEST_BODY', 400, 'Request body must be a JSON object.');
   }
 
-  const allowedKeys = ['resolved', 'notes'];
+  const allowedKeys = ['resolved', 'notes', 'reviewer', 'reviewerLabel', 'reviewer_label', 'expectedVersion', 'expected_version'];
   for (const key of Object.keys(body)) {
     if (!allowedKeys.includes(key)) {
       throw new AppError('TAMPERING_DETECTED', 400, `Unauthorized field "${key}" in finding resolution.`);
@@ -157,7 +157,19 @@ export function validateReviewActionBody(body: any): {
     throw new AppError('INVALID_REQUEST_BODY', 400, 'Request body must be a JSON object.');
   }
 
-  const allowedKeys = ['action', 'notes', 'newQueue', 'newStatus', 'new_queue', 'new_status'];
+  const allowedKeys = [
+    'action',
+    'notes',
+    'newQueue',
+    'newStatus',
+    'new_queue',
+    'new_status',
+    'reviewer',
+    'reviewerLabel',
+    'reviewer_label',
+    'expectedVersion',
+    'expected_version'
+  ];
   for (const key of Object.keys(body)) {
     if (!allowedKeys.includes(key)) {
       throw new AppError('TAMPERING_DETECTED', 400, `Unauthorized field "${key}" in review action.`);
@@ -168,7 +180,13 @@ export function validateReviewActionBody(body: any): {
     throw new AppError('INVALID_INPUT', 400, 'Review action is required.');
   }
 
-  const actionStr = body.action.trim() as ReviewAction['action'];
+  let normalizedAction = body.action.trim().toLowerCase();
+  if (normalizedAction === 'ready') normalizedAction = 'approve_ready';
+  if (normalizedAction === 'escalate') normalizedAction = 'escalate_priority';
+  if (normalizedAction === 'finalize' || normalizedAction === 'complete') normalizedAction = 'mark_complete';
+  if (normalizedAction === 'request_missing_info') normalizedAction = 'request_info';
+
+  const actionStr = normalizedAction as ReviewAction['action'];
   if (!VALID_REVIEW_ACTIONS.includes(actionStr)) {
     throw new AppError('INVALID_INPUT', 400, `Invalid review action "${body.action}".`);
   }

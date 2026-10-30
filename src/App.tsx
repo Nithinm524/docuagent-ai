@@ -445,10 +445,11 @@ function AppContent() {
         setCases((prev) => prev.map((c) => (c.case_id === updated.case_id ? updated : c)));
         notify('success', 'Field attribute corrected and validation rules re-evaluated.');
       } else {
-        throw new Error(`Server returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || `Server returned status ${res.status}`);
       }
     } catch (err: any) {
-      notify('error', 'Failed to update field value. Please try again.');
+      notify('error', `Field update failed: ${err.message || 'Please try again.'}`);
     }
   };
 
@@ -466,10 +467,11 @@ function AppContent() {
         setCases((prev) => prev.map((c) => (c.case_id === updated.case_id ? updated : c)));
         notify('success', resolved ? 'Validation finding marked as resolved.' : 'Validation finding reopened.');
       } else {
-        throw new Error(`Server returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || `Server returned status ${res.status}`);
       }
     } catch (err: any) {
-      notify('error', 'Failed to update finding status. Please try again.');
+      notify('error', `Finding resolution failed: ${err.message || 'Please try again.'}`);
     }
   };
 
@@ -489,7 +491,7 @@ function AppContent() {
         body: JSON.stringify({
           action,
           notes,
-          reviewerLabel: 'Human Specialist',
+          reviewerLabel: currentUser?.full_name || currentUser?.email || 'Human Specialist',
           newQueue,
           newStatus
         })
@@ -499,21 +501,23 @@ function AppContent() {
         setCases((prev) => prev.map((c) => (c.case_id === updated.case_id ? updated : c)));
         notify('success', 'Reviewer decision and notes saved successfully.');
       } else {
-        throw new Error(`Server returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || `Server returned status ${res.status}`);
       }
     } catch (err: any) {
-      notify('error', 'Failed to record reviewer decision.');
+      notify('error', `Review action failed: ${err.message || 'Failed to record reviewer decision.'}`);
+      throw err;
     } finally {
       setIsProcessingAction(false);
     }
   };
 
-  // Re-run agent workflow
+  // Re-run / Re-evaluate agent workflow
   const handleReRunAgent = async () => {
     if (!selectedCaseId) return;
     setIsProcessingAction(true);
     try {
-      const res = await authFetch(`/api/cases/${selectedCaseId}/re-run`, {
+      const res = await authFetch(`/api/cases/${selectedCaseId}/re-evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviewer: 'Human Specialist' })
@@ -523,10 +527,11 @@ function AppContent() {
         setCases((prev) => prev.map((c) => (c.case_id === updated.case_id ? updated : c)));
         notify('success', 'Agent re-evaluation complete. Extracted fields and rules refreshed.');
       } else {
-        throw new Error(`Server returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || errJson.message || `Server returned status ${res.status}`);
       }
     } catch (err: any) {
-      notify('error', 'Agent re-evaluation failed. Please try again.');
+      notify('error', `Re-evaluation failed: ${err.message || 'Please verify document status.'}`);
     } finally {
       setIsProcessingAction(false);
     }

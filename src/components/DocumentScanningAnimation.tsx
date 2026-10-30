@@ -284,22 +284,52 @@ export const DocumentScanningAnimation: React.FC<DocumentScanningAnimationProps>
           /* Real Results View (Smoothly Transitioned from Scanning) */
           <div className="space-y-6">
             {/* Header Banner */}
-            <div className="p-4 sm:p-5 rounded-xl border border-emerald-300 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-[#071912] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className={`p-4 sm:p-5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+              completedCase.status === 'Needs More Information'
+                ? 'border-amber-300 dark:border-amber-900/60 bg-amber-50/70 dark:bg-[#1a1408]'
+                : completedCase.status === 'Priority Review'
+                ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/70 dark:bg-[#1a0808]'
+                : completedCase.status === 'Processing Failed'
+                ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/70 dark:bg-[#1a0808]'
+                : 'border-emerald-300 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-[#071912]'
+            }`}>
               <div className="flex items-start space-x-3.5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
-                  <CheckCircle2 className="w-6 h-6 stroke-[2]" aria-hidden="true" />
+                <div className={`w-10 h-10 rounded-xl text-white flex items-center justify-center shrink-0 shadow-sm ${
+                  completedCase.status === 'Needs More Information'
+                    ? 'bg-amber-600'
+                    : completedCase.status === 'Priority Review'
+                    ? 'bg-rose-600'
+                    : completedCase.status === 'Processing Failed'
+                    ? 'bg-rose-700'
+                    : 'bg-emerald-600'
+                }`}>
+                  {completedCase.status === 'Needs More Information' ? (
+                    <AlertTriangle className="w-6 h-6 stroke-[2]" aria-hidden="true" />
+                  ) : completedCase.status === 'Priority Review' || completedCase.status === 'Processing Failed' ? (
+                    <AlertCircle className="w-6 h-6 stroke-[2]" aria-hidden="true" />
+                  ) : (
+                    <CheckCircle2 className="w-6 h-6 stroke-[2]" aria-hidden="true" />
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white">
-                      Document Ingestion Complete
+                      {completedCase.status === 'Needs More Information'
+                        ? 'Document Ingestion Incomplete: Missing Required Information'
+                        : completedCase.status === 'Priority Review'
+                        ? 'Document Ingestion Complete: Escalated to Priority Review'
+                        : completedCase.status === 'Processing Failed'
+                        ? 'Document Ingestion Failed'
+                        : 'Document Ingestion & Validation Complete'}
                     </h3>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-900 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-800">
                       Case {completedCase.case_number}
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
-                    Document classified as <strong>{DOCUMENT_SCHEMAS[completedCase.document_type]?.title || completedCase.document_type}</strong> and routed to <strong>{completedCase.assigned_queue}</strong>.
+                    {completedCase.status === 'Needs More Information'
+                      ? `Required schema fields were missing or incomplete. Routed to ${completedCase.assigned_queue} queue for manual intake.`
+                      : `Document classified as ${DOCUMENT_SCHEMAS[completedCase.document_type]?.title || completedCase.document_type} and routed to ${completedCase.assigned_queue}.`}
                   </p>
                 </div>
               </div>
@@ -343,21 +373,38 @@ export const DocumentScanningAnimation: React.FC<DocumentScanningAnimationProps>
                           {f.field_label}
                         </span>
                         <span className="font-semibold text-slate-900 dark:text-slate-100 truncate block font-mono">
-                          {f.field_value || <span className="text-slate-400 dark:text-slate-600 italic">Empty</span>}
+                          {f.field_value ? (
+                            f.field_value
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                              Missing Field
+                            </span>
+                          )}
                         </span>
+                        {f.source_snippet && (
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 truncate block font-mono mt-0.5">
+                            Evidence: {f.source_snippet}
+                          </span>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
-                        <span
-                          className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                            f.confidence >= 0.85
-                              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
-                              : f.confidence >= 0.6
-                              ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400'
-                              : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-400'
-                          }`}
-                        >
-                          {Math.round(f.confidence * 100)}% conf
-                        </span>
+                        {f.field_value ? (
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                              f.confidence >= 0.85
+                                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
+                                : f.confidence >= 0.6
+                                ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400'
+                                : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-400'
+                            }`}
+                          >
+                            {Math.round(f.confidence * 100)}% conf
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400">
+                            N/A (Missing)
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

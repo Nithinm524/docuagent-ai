@@ -13,12 +13,14 @@
  * - Diagnostics, usage tracking, budgets, and backup/restore admin endpoints
  */
 
-import express, { Request, Response, NextFunction } from 'express';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { caseStore } from './store.ts';
 import { runAgentPipeline, reEvaluateCase, generateExecutiveSummary } from './agent.ts';
 import { SYNTHETIC_SCENARIOS } from '../src/shared/samples.ts';
-import { AuditEvent, ReviewAction } from '../src/shared/types.ts';
+import { DOCUMENT_SCHEMAS } from '../src/shared/validation.ts';
+import type { AuditEvent, ReviewAction } from '../src/shared/types.ts';
 import { log, getRecentLogs } from './logger.ts';
 import { sendError, AppError } from './errors.ts';
 import {
@@ -953,28 +955,72 @@ api.post(
 );
 
 // -------------------------------------------------------------
-// 6. RE-RUN AGENT WORKFLOW
+// 6. RE-RUN / RE-EVALUATE AGENT WORKFLOW
 // -------------------------------------------------------------
 
-api.post(
-  '/api/cases/:id/re-run',
-  expensiveAiLimiter,
-  requireAuth(),
-  asyncHandler(async (req: Request, res: Response) => {
-    const reviewer = req.body.reviewer || 'Reviewer';
-    const updated = await reEvaluateCase(req.params.id, reviewer);
+const handleReEvaluateRoute = asyncHandler(async (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const reviewer = req.body?.reviewer || user?.name || 'Human Specialist';
+  const reqId = (req as any).requestId;
+  const caseId = req.params.id;
+
+  const existing = caseStore.getById(caseId);
+  if (!existing) {
+    return sendError(
+      res,
+      404,
+      'CASE_NOT_FOUND',
+      `Cannot re-evaluate: Case "${caseId}" was not found in the database.`,
+      reqId
+    );
+  }
+
+  try {
+    caseStore.checkRecordAccess(existing, user);
+  } catch (err: any) {
+    return sendError(res, 403, 'IDOR_FORBIDDEN', err.message || 'Access denied', reqId);
+  }
+
+  try {
+    const updated = await reEvaluateCase(caseId, reviewer);
     if (!updated) {
       return sendError(
         res,
         404,
         'CASE_NOT_FOUND',
-        `Case ${req.params.id} not found`,
-        (req as any).requestId
+        `Re-evaluation failed: Case "${caseId}" could not be located.`,
+        reqId
       );
     }
+    log({
+      level: 'INFO',
+      operation: 'CASE_RE_EVALUATED',
+      requestId: reqId,
+      caseId,
+      message: `Case ${updated.case_number} re-evaluated by ${reviewer}. Status: ${updated.status}; Queue: ${updated.assigned_queue}.`
+    });
     res.json(updated);
-  })
-);
+  } catch (err: any) {
+    log({
+      level: 'ERROR',
+      operation: 'RE_EVALUATE_EXCEPTION',
+      requestId: reqId,
+      caseId,
+      message: `Re-evaluation failed: ${err.message}`,
+      errorSummary: err.message
+    });
+    return sendError(
+      res,
+      500,
+      'INTERNAL_SERVER_ERROR',
+      `Re-evaluation execution error: ${err.message || 'Internal processing failure'}`,
+      reqId
+    );
+  }
+});
+
+api.post('/api/cases/:id/re-run', expensiveAiLimiter, requireAuth(), handleReEvaluateRoute);
+api.post('/api/cases/:id/re-evaluate', expensiveAiLimiter, requireAuth(), handleReEvaluateRoute);
 
 // -------------------------------------------------------------
 // 7. EDIT FIELD (OPTIMISTIC CONCURRENCY CHECK)
@@ -1135,50 +1181,95 @@ api.patch(
 // 9. FORMAL REVIEW ACTION (OPTIMISTIC CONCURRENCY CHECK)
 // -------------------------------------------------------------
 
-api.patch(
-  '/api/cases/:id/review-action',
-  standardApiLimiter,
-  requireAuth(),
-  (req: Request, res: Response) => {
-    const { action, notes, newQueue, newStatus } = validateReviewActionBody(req.body);
-    const { id } = req.params;
-    const reqId = (req as any).requestId;
-    const user = (req as any).user;
-    const reviewerLabel = user?.name || req.body.reviewerLabel || 'Reviewer';
-    const expectedVersion = req.body.expectedVersion;
+const handleReviewAction = (req: Request, res: Response) => {
+  const { action, notes, newQueue, newStatus } = validateReviewActionBody(req.body);
+  const { id } = req.params;
+  const reqId = (req as any).requestId;
+  const user = (req as any).user;
+  const reviewerLabel = user?.name || req.body.reviewerLabel || req.body.reviewer || 'Reviewer';
+  const reviewerId = user?.userId || 'usr-reviewer';
+  const expectedVersion = req.body.expectedVersion ?? req.body.expected_version;
 
-    const existing = caseStore.getById(id);
-    if (!existing) {
-      return sendError(res, 404, 'CASE_NOT_FOUND', `Case ${id} not found`, reqId);
-    }
-    try {
-      caseStore.checkRecordAccess(existing, user);
-    } catch (err: any) {
-      return sendError(res, 403, 'IDOR_FORBIDDEN', err.message || 'Access denied', reqId);
-    }
+  const existing = caseStore.getById(id);
+  if (!existing) {
+    return sendError(res, 404, 'CASE_NOT_FOUND', `Case ${id} not found`, reqId);
+  }
+  try {
+    caseStore.checkRecordAccess(existing, user);
+  } catch (err: any) {
+    return sendError(res, 403, 'IDOR_FORBIDDEN', err.message || 'Access denied', reqId);
+  }
 
-    try {
-      const updated = caseStore.update(
-        id,
-        (record) => {
+  try {
+    const updated = caseStore.update(
+      id,
+      (record) => {
+        const prevStatus = record.status;
+        const prevQueue = record.assigned_queue;
         let summaryText = '';
 
-        if (action === 'mark_complete') {
-          record.status = 'Review Completed';
-          summaryText = `Case review completed and finalized by ${reviewerLabel || 'Reviewer'}.`;
+        if (action === 'approve_ready') {
+          // 1. Check whether all mandatory document fields are available
+          const schema = DOCUMENT_SCHEMAS[record.document_type];
+          if (schema) {
+            const missingMandatory = schema.fields.filter(
+              (f) =>
+                f.required &&
+                !record.extracted_fields.find((ef) => ef.field_name === f.name)?.field_value?.trim()
+            );
+            if (missingMandatory.length > 0) {
+              throw new AppError(
+                'INVALID_INPUT',
+                400,
+                `Cannot mark ready for review: mandatory field(s) missing: ${missingMandatory.map((f) => f.label).join(', ')}.`
+              );
+            }
+          }
+
+          // 2. Check whether required validation rules have passed
+          const fatalFindings = record.validation_findings.filter(
+            (f) =>
+              !f.resolved &&
+              f.result === 'failed' &&
+              (f.category === 'missing_information' || (f.category === 'format_error' && f.severity === 'high'))
+          );
+          if (fatalFindings.length > 0) {
+            throw new AppError(
+              'INVALID_INPUT',
+              400,
+              `Cannot mark ready for review: unresolved required validation check(s): ${fatalFindings.map((f) => f.check_name).join(', ')}.`
+            );
+          }
+
+          record.status = 'Ready for Review';
+          record.assigned_queue = 'General Review';
+          summaryText = `Case marked Ready for Review by ${reviewerLabel}. All mandatory schema fields verified.`;
         } else if (action === 'request_info') {
+          if (!notes || !notes.trim()) {
+            throw new AppError(
+              'INVALID_INPUT',
+              400,
+              'Reviewer explanation is required when requesting missing information.'
+            );
+          }
           record.status = 'Needs More Information';
           record.assigned_queue = 'Missing Information';
-          summaryText = `Human reviewer flagged case for additional information intake. Notes: ${
-            notes || 'Information requested.'
-          }`;
+          summaryText = `Reviewer flagged case for additional information. Requested details: ${notes.trim()}`;
         } else if (action === 'escalate_priority') {
+          if (!notes || !notes.trim()) {
+            throw new AppError(
+              'INVALID_INPUT',
+              400,
+              'Escalation reason is required when escalating to Priority Review.'
+            );
+          }
           record.status = 'Priority Review';
           record.assigned_queue = 'Priority Review';
-          summaryText = `Case escalated to Priority Review queue by ${reviewerLabel || 'Reviewer'}.`;
-        } else if (action === 'approve_ready') {
-          record.status = 'Ready for Review';
-          summaryText = `Case marked Ready for Review by ${reviewerLabel || 'Reviewer'}.`;
+          record.priority = 'high';
+          summaryText = `Case escalated to Priority Review queue by ${reviewerLabel}. Reason: ${notes.trim()}`;
+        } else if (action === 'mark_complete') {
+          record.status = 'Review Completed';
+          summaryText = `Case review completed and finalized by ${reviewerLabel}.`;
         }
 
         if (newQueue) {
@@ -1188,10 +1279,36 @@ api.patch(
           record.status = newStatus;
         }
 
+        const selectedDecisionLabel =
+          action === 'approve_ready'
+            ? 'Mark Ready for Review'
+            : action === 'request_info'
+            ? 'Request Missing Information'
+            : action === 'escalate_priority'
+            ? 'Escalate to Priority Review'
+            : 'Finalize & Complete Review';
+
+        record.assigned_reviewer = reviewerLabel;
+        record.reviewer_decision = {
+          case_id: record.case_id,
+          document_id: record.case_number,
+          reviewer_id: reviewerId,
+          reviewed_by: reviewerLabel,
+          action,
+          selected_decision: selectedDecisionLabel,
+          notes: notes || summaryText,
+          previous_status: prevStatus,
+          new_status: record.status,
+          previous_queue: prevQueue,
+          new_queue: record.assigned_queue,
+          priority: record.priority || (action === 'escalate_priority' ? 'high' : 'normal'),
+          reviewed_at: new Date().toISOString()
+        };
+
         const reviewAction: ReviewAction = {
           action_id: `act-${id}-${Date.now()}`,
           case_id: id,
-          reviewer_label: reviewerLabel || 'Reviewer',
+          reviewer_label: reviewerLabel,
           action: action,
           notes: notes || summaryText,
           created_at: new Date().toISOString()
@@ -1200,10 +1317,17 @@ api.patch(
         const audit: AuditEvent = {
           event_id: `evt-${id}-${Date.now()}`,
           case_id: id,
-          event_type: action === 'mark_complete' ? 'REVIEW_COMPLETED' : 'QUEUE_TRANSFERRED',
-          actor: 'Human Reviewer',
+          event_type:
+            action === 'mark_complete'
+              ? 'REVIEW_COMPLETED'
+              : action === 'request_info'
+              ? 'MISSING_INFO_REQUESTED'
+              : action === 'escalate_priority'
+              ? 'PRIORITY_ESCALATED'
+              : 'STATUS_CHANGED',
+          actor: reviewerLabel,
           summary: summaryText,
-          details: notes,
+          details: `Decision: ${selectedDecisionLabel} | Previous Status: ${prevStatus} -> New Status: ${record.status}${notes ? ` | Notes: ${notes}` : ''}`,
           created_at: new Date().toISOString()
         };
 
@@ -1215,36 +1339,49 @@ api.patch(
     );
 
     // Dispatch event notifications according to reviewer action
-    if (action === 'mark_complete') {
-      notificationService.notify({
-        event: 'REVIEW_COMPLETED',
-        caseId: updated.case_id,
-        caseNumber: updated.case_number,
-        reviewer: reviewerLabel,
-        status: updated.status,
-        recipientUserId: user?.userId,
-        recipientEmail: user?.email
-      });
-    } else if (newQueue || action === 'escalate_priority' || action === 'request_info') {
-      notificationService.notify({
-        event: 'CASE_ASSIGNED',
-        caseId: updated.case_id,
-        caseNumber: updated.case_number,
-        reviewer: reviewerLabel,
-        status: updated.status,
-        recipientUserId: user?.userId,
-        recipientEmail: user?.email
-      });
+    let notificationDispatched = false;
+    try {
+      if (action === 'mark_complete') {
+        const logEntry = notificationService.notify({
+          event: 'REVIEW_COMPLETED',
+          caseId: updated.case_id,
+          caseNumber: updated.case_number,
+          reviewer: reviewerLabel,
+          status: updated.status,
+          recipientUserId: user?.userId,
+          recipientEmail: user?.email
+        });
+        notificationDispatched = logEntry?.deliveryStatus === 'DISPATCHED';
+      } else if (action === 'escalate_priority' || action === 'request_info' || newQueue) {
+        const logEntry = notificationService.notify({
+          event: 'CASE_ASSIGNED',
+          caseId: updated.case_id,
+          caseNumber: updated.case_number,
+          reviewer: reviewerLabel,
+          status: updated.status,
+          recipientUserId: user?.userId,
+          recipientEmail: user?.email
+        });
+        notificationDispatched = logEntry?.deliveryStatus === 'DISPATCHED';
+      }
+    } catch {
+      notificationDispatched = false;
     }
 
-    res.json(updated);
+    res.json({
+      ...updated,
+      notification_sent: notificationDispatched
+    });
   } catch (err: any) {
     if (err instanceof AppError) {
       return sendError(res, err.statusCode, err.code, err.message, reqId, err.details);
     }
     throw err;
   }
-});
+};
+
+api.patch('/api/cases/:id/review-action', standardApiLimiter, requireAuth(), handleReviewAction);
+api.post('/api/cases/:id/review-action', standardApiLimiter, requireAuth(), handleReviewAction);
 
 // -------------------------------------------------------------
 // 10. GENERATE AI SUMMARY (BUDGET CAPPED)
@@ -1281,8 +1418,7 @@ api.post(
       caseItem.status,
       caseItem.assigned_queue,
       caseItem.validation_findings,
-      caseItem.extracted_fields,
-      caseItem.raw_text
+      caseItem.extracted_fields
     );
 
     const updated = caseStore.update(caseItem.case_id, (c) => ({

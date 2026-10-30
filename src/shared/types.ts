@@ -48,6 +48,7 @@ export interface ExtractedField {
   reviewed_value?: string;
   is_edited: boolean;
   source_page?: number;
+  source_snippet?: string;
 }
 
 export interface ValidationFinding {
@@ -131,7 +132,10 @@ export interface AuditEvent {
     | 'AUTHENTICATION_FAILURE'
     | 'ACCESS_DENIED'
     | 'RATE_LIMIT_TRIGGERED'
-    | 'SECURITY_ALERT';
+    | 'SECURITY_ALERT'
+    | 'STATUS_CHANGED'
+    | 'MISSING_INFO_REQUESTED'
+    | 'PRIORITY_ESCALATED';
   actor: 'AI Agent' | 'Human Reviewer' | 'System' | 'Data Principal' | 'Security Engine';
   summary: string;
   details?: string;
@@ -145,6 +149,22 @@ export interface AgentStepTrace {
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   duration_ms: number;
   output_summary: string;
+}
+
+export interface ReviewerDecisionRecord {
+  case_id: string;
+  document_id: string;
+  reviewer_id: string;
+  reviewed_by: string;
+  action: ReviewAction['action'];
+  selected_decision: string;
+  notes: string;
+  previous_status: CaseStatus;
+  new_status: CaseStatus;
+  previous_queue?: ReviewerQueue;
+  new_queue?: ReviewerQueue;
+  priority?: 'high' | 'normal' | 'low';
+  reviewed_at: string;
 }
 
 export interface CaseRecord {
@@ -166,14 +186,10 @@ export interface CaseRecord {
   created_at: string;
   updated_at: string;
   status: CaseStatus;
+  priority?: 'high' | 'normal' | 'low';
   assigned_queue: ReviewerQueue;
   assigned_reviewer?: string;
-  reviewer_decision?: {
-    action: string;
-    reviewed_by: string;
-    reviewed_at: string;
-    notes?: string;
-  };
+  reviewer_decision?: ReviewerDecisionRecord;
   routing_reason: string;
   executive_summary?: string;
   processing_error?: string;

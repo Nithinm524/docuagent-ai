@@ -22,6 +22,11 @@ import {
   generateSampleSelectablePDF,
   generateSampleGeneralDocPDF,
   generateSampleScannedPDF,
+  generateSampleInvoicePDF,
+  generateSampleInvoicePNG,
+  generateSampleInvoiceJPEG,
+  generateSampleInvoiceMissingFieldsPDF,
+  generateSampleNonInvoicePNG,
   dataURLtoFile
 } from '../utils/sampleGenerator.ts';
 import {
@@ -656,6 +661,71 @@ export const UploadView: React.FC<UploadViewProps> = ({
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = generateSampleInvoicePDF();
+                    const file = dataURLtoFile(url, 'commercial_vendor_invoice.pdf');
+                    setDocumentType('auto');
+                    processSelectedFile(file);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-cyan-100/70 hover:bg-cyan-200 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  + Invoice (PDF)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = generateSampleInvoicePNG();
+                    const file = dataURLtoFile(url, 'commercial_vendor_invoice.png');
+                    setDocumentType('invoice');
+                    processSelectedFile(file);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-cyan-100/70 hover:bg-cyan-200 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  + Invoice (PNG)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = generateSampleInvoiceJPEG();
+                    const file = dataURLtoFile(url, 'commercial_vendor_invoice.jpg');
+                    setDocumentType('invoice');
+                    processSelectedFile(file);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-cyan-100/70 hover:bg-cyan-200 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  + Invoice (JPEG)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = generateSampleInvoiceMissingFieldsPDF();
+                    const file = dataURLtoFile(url, 'invoice_missing_fields.pdf');
+                    setDocumentType('invoice');
+                    processSelectedFile(file);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-amber-100/70 hover:bg-amber-200 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  + Invoice (Missing Fields)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = generateSampleNonInvoicePNG();
+                    const file = dataURLtoFile(url, 'system_architecture_diagram.png');
+                    setDocumentType('auto');
+                    processSelectedFile(file);
+                  }}
+                  className="px-2.5 py-1 rounded-md bg-rose-100/70 hover:bg-rose-200 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  + Non-Invoice (Diagram)
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {

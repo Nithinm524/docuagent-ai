@@ -210,3 +210,24 @@ test('unknown document type produces warning finding and routes to Missing Infor
   assert.match(decision.routingReason, /Unknown/);
 });
 
+test('runValidationChecks passes invoice with all required fields and validates optional fields', () => {
+  const fields: ExtractedField[] = [
+    { field_id: '1', case_id: 'inv1', field_name: 'invoice_number', field_label: 'Invoice Number', field_value: 'INV-2026-88941', confidence: 0.95, is_uncertain: false, is_edited: false },
+    { field_id: '2', case_id: 'inv1', field_name: 'vendor_name', field_label: 'Vendor Name', field_value: 'Apex Global Cloud Technologies Inc.', confidence: 0.92, is_uncertain: false, is_edited: false },
+    { field_id: '3', case_id: 'inv1', field_name: 'client_name', field_label: 'Client Name', field_value: 'Nexus Frontier Systems LLC', confidence: 0.90, is_uncertain: false, is_edited: false },
+    { field_id: '4', case_id: 'inv1', field_name: 'invoice_date', field_label: 'Invoice Date', field_value: '2026-10-15', confidence: 0.93, is_uncertain: false, is_edited: false },
+    { field_id: '5', case_id: 'inv1', field_name: 'due_date', field_label: 'Due Date', field_value: '2026-11-15', confidence: 0.91, is_uncertain: false, is_edited: false },
+    { field_id: '6', case_id: 'inv1', field_name: 'subtotal', field_label: 'Subtotal', field_value: '$4,500.00', confidence: 0.90, is_uncertain: false, is_edited: false },
+    { field_id: '7', case_id: 'inv1', field_name: 'tax_amount', field_label: 'Tax / GST', field_value: '$450.00', confidence: 0.90, is_uncertain: false, is_edited: false },
+    { field_id: '8', case_id: 'inv1', field_name: 'total_amount', field_label: 'Total Payable', field_value: '$4,950.00', confidence: 0.94, is_uncertain: false, is_edited: false }
+  ];
+
+  const findings = runValidationChecks('invoice', fields);
+  const failedFindings = findings.filter((f) => f.result === 'failed');
+  assert.equal(failedFindings.length, 0);
+
+  const decision = evaluateAndRoute(findings, false, 'invoice');
+  assert.equal(decision.status, 'Ready for Review');
+  assert.equal(decision.assignedQueue, 'General Review');
+});
+

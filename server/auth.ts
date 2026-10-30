@@ -13,7 +13,7 @@
  * - Tenant isolation / IDOR ownership checking
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { cryptoService } from './crypto.ts';
