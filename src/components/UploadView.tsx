@@ -11,7 +11,9 @@ import {
   Info,
   Download,
   FileSpreadsheet,
-  Check
+  Check,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 import { CaseRecord, DocumentType } from '../shared/types.ts';
 import { DOCUMENT_SCHEMAS } from '../shared/validation.ts';
@@ -35,6 +37,8 @@ import {
   StageDetail
 } from './DocumentScanningAnimation.tsx';
 import { authFetch, ensureAuthToken } from '../utils/authFetch.ts';
+import { UpgradeModal } from './UpgradeModal.tsx';
+import { type PlanId } from '../shared/plans.ts';
 
 interface UploadViewProps {
   onCaseProcessed: (caseId: string) => void;
@@ -45,6 +49,10 @@ interface UploadViewProps {
   onOpenPrivacy?: () => void;
   onOpenTerms?: () => void;
   onOpenDataCollection?: () => void;
+  onOpenPricing?: () => void;
+  userPlanId?: string;
+  userEmail?: string;
+  userName?: string;
 }
 
 export const UploadView: React.FC<UploadViewProps> = ({
@@ -53,7 +61,11 @@ export const UploadView: React.FC<UploadViewProps> = ({
   onViewQueue,
   onOpenPrivacy,
   onOpenTerms,
-  onOpenDataCollection
+  onOpenDataCollection,
+  onOpenPricing,
+  userPlanId = 'free',
+  userEmail,
+  userName
 }) => {
   const [documentType, setDocumentType] = useState<DocumentType | 'auto'>('auto');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -73,6 +85,20 @@ export const UploadView: React.FC<UploadViewProps> = ({
   const [completedCase, setCompletedCase] = useState<CaseRecord | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const uploadRequestCounterRef = useRef<number>(0);
+
+  // Upgrade Modal State
+  const [upgradeModalInfo, setUpgradeModalInfo] = useState<{
+    isOpen: boolean;
+    title?: string;
+    featureName?: string;
+    explanation?: string;
+    recommendedPlan: PlanId;
+    isQuota: boolean;
+  }>({
+    isOpen: false,
+    recommendedPlan: 'professional',
+    isQuota: false
+  });
 
   // Clean up Object URL and in-flight request on unmount or file reset
   useEffect(() => {
@@ -298,7 +324,27 @@ export const UploadView: React.FC<UploadViewProps> = ({
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         let humanMessage = errorData.error;
-        if (res.status === 401) {
+        if (res.status === 429) {
+          humanMessage = errorData.error || 'Monthly document processing quota limit reached.';
+          setUpgradeModalInfo({
+            isOpen: true,
+            title: 'Monthly Document Quota Reached',
+            featureName: 'Document Intake Capacity',
+            explanation: errorData.error || 'You have reached your document intake allowance for this monthly cycle. Upgrade your subscription to continue automated processing in INR.',
+            recommendedPlan: 'starter',
+            isQuota: true
+          });
+        } else if (res.status === 403 && (errorData.code === 'PREMIUM_FEATURE_LOCKED' || errorData.error?.includes('locked'))) {
+          humanMessage = errorData.error || 'This premium feature requires an upgraded subscription plan.';
+          setUpgradeModalInfo({
+            isOpen: true,
+            title: 'Premium Feature Locked',
+            featureName: errorData.featureKey || 'Advanced Feature',
+            explanation: errorData.error,
+            recommendedPlan: errorData.requiredPlan || 'professional',
+            isQuota: false
+          });
+        } else if (res.status === 401) {
           humanMessage = errorData.error || 'Authentication credentials required for this endpoint. Please verify your session credentials or switch to Demo Reviewer mode.';
         } else if (res.status === 413) {
           humanMessage = errorData.error || 'File size limit exceeded. The uploaded document exceeds the 15MB maximum boundary.';
@@ -565,13 +611,72 @@ export const UploadView: React.FC<UploadViewProps> = ({
 
           {/* Step 2: Drag & Drop Zone */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0B1120] p-4 sm:p-5 space-y-4 shadow-xs">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">
-                Document File
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <label className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                <span>Document File</span>
+                <span className="text-[10px] text-slate-400 font-normal">PDF, PNG, JPG, or JPEG · Up to 15 MB</span>
               </label>
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                PDF, PNG, JPG, or JPEG · Up to 15 MB
-              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (userPlanId === 'free' || !userPlanId) {
+                      setUpgradeModalInfo({
+                        isOpen: true,
+                        title: 'Bulk Document Uploads',
+                        featureName: 'Bulk Document Uploads',
+                        explanation: 'Bulk document upload allows processing multiple files simultaneously with parallel automated routing. Available starting on the Starter plan (₹499/mo).',
+                        recommendedPlan: 'starter',
+                        isQuota: false
+                      });
+                    } else {
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer border border-slate-200 dark:border-slate-700 transition-colors"
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                  <span>Bulk Upload</span>
+                  <span className="text-[9px] uppercase font-bold px-1 rounded bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300">
+                    STARTER
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Multimodal AI Line-Item Extraction Callout */}
+            <div className="p-3 rounded-lg bg-cyan-50/50 dark:bg-slate-900/60 border border-cyan-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-900 dark:text-white">Multimodal AI Vision &amp; Line-Items</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-gradient-to-r from-cyan-600 to-indigo-600 text-white uppercase">PRO</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Extracts tabular line items, sub-totals, and GST breakdowns with spatial visual grounding.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (userPlanId !== 'professional' && userPlanId !== 'business' && userPlanId !== 'enterprise') {
+                    setUpgradeModalInfo({
+                      isOpen: true,
+                      title: 'Multimodal AI & Line-Item Extraction',
+                      featureName: 'Multimodal AI Extraction',
+                      explanation: 'Multimodal AI Extraction uses advanced vision models to parse complex layouts, invoices, and table line items. Available on Professional (₹1,499/mo) and Business plans.',
+                      recommendedPlan: 'professional',
+                      isQuota: false
+                    });
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-800 hover:bg-cyan-50 dark:hover:bg-slate-700 cursor-pointer shrink-0 shadow-2xs"
+              >
+                {userPlanId === 'professional' || userPlanId === 'business' || userPlanId === 'enterprise' ? 'Active' : 'Unlock PRO'}
+              </button>
             </div>
 
             {/* Pre-Upload Privacy & Data Transparency Notice */}
@@ -1083,6 +1188,25 @@ export const UploadView: React.FC<UploadViewProps> = ({
         </div>
       </div>
       )}
+      {/* Upgrade Modal for Locked Features and Quota Alerts */}
+      <UpgradeModal
+        isOpen={upgradeModalInfo.isOpen}
+        onClose={() => setUpgradeModalInfo({ ...upgradeModalInfo, isOpen: false })}
+        title={upgradeModalInfo.title}
+        featureName={upgradeModalInfo.featureName}
+        explanation={upgradeModalInfo.explanation}
+        recommendedPlanId={upgradeModalInfo.recommendedPlan}
+        isQuotaExceeded={upgradeModalInfo.isQuota}
+        onOpenPricing={() => {
+          setUpgradeModalInfo({ ...upgradeModalInfo, isOpen: false });
+          if (onOpenPricing) onOpenPricing();
+        }}
+        userEmail={userEmail}
+        userName={userName}
+        onUpgradeSuccess={() => {
+          setUpgradeModalInfo({ ...upgradeModalInfo, isOpen: false });
+        }}
+      />
     </div>
   );
 };

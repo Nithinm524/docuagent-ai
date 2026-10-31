@@ -13,6 +13,10 @@ import { TermsView } from './components/TermsView.tsx';
 import { CookiePolicyView } from './components/CookiePolicyView.tsx';
 import { DpdpReadinessView } from './components/DpdpReadinessView.tsx';
 import { DataCollectionPrivacyView } from './components/DataCollectionPrivacyView.tsx';
+import { PricingView } from './components/PricingView.tsx';
+import { BillingView } from './components/BillingView.tsx';
+import { AdminBillingSection } from './components/AdminBillingSection.tsx';
+import { type PlanId } from './shared/plans.ts';
 import { PreLaunchLegalChecklistModal } from './components/PreLaunchLegalChecklistModal.tsx';
 import { NotificationPreferencesModal } from './components/NotificationPreferencesModal.tsx';
 import { SecurityPrivacyRiskModal } from './components/SecurityPrivacyRiskModal.tsx';
@@ -81,12 +85,15 @@ function AppContent() {
     return 'dashboard';
   });
 
-  const [specialPage, setSpecialPage] = useState<'privacy' | 'terms' | 'cookies' | 'dpdp' | 'data-collection' | null>(() => {
+  const [specialPage, setSpecialPage] = useState<'privacy' | 'terms' | 'cookies' | 'dpdp' | 'data-collection' | 'pricing' | 'billing' | 'admin-billing' | null>(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const pageParam = urlParams.get('page');
-      if (pageParam === 'privacy' || pageParam === 'terms' || pageParam === 'cookies' || pageParam === 'dpdp' || pageParam === 'data-collection') {
+      if (pageParam === 'privacy' || pageParam === 'terms' || pageParam === 'cookies' || pageParam === 'dpdp' || pageParam === 'data-collection' || pageParam === 'pricing' || pageParam === 'billing' || pageParam === 'admin-billing') {
         return pageParam as any;
+      }
+      if (urlParams.get('pricing') === 'true') {
+        return 'pricing';
       }
     } catch {}
     return null;
@@ -97,7 +104,7 @@ function AppContent() {
       const urlParams = new URLSearchParams(window.location.search);
       const pageParam = urlParams.get('page');
       const tabParam = urlParams.get('tab');
-      if (pageParam && !['privacy', 'terms', 'cookies', 'dpdp', 'data-collection'].includes(pageParam)) {
+      if (pageParam && !['privacy', 'terms', 'cookies', 'dpdp', 'data-collection', 'pricing', 'billing', 'admin-billing'].includes(pageParam)) {
         return true;
       }
       if (tabParam && !['dashboard', 'upload', 'queues', 'reports'].includes(tabParam)) {
@@ -109,6 +116,8 @@ function AppContent() {
     } catch {}
     return false;
   });
+
+  const [userPlanId, setUserPlanId] = useState<PlanId>('free');
 
   const [isCookiePreferencesOpen, setIsCookiePreferencesOpen] = useState(false);
   const [isRiskModalOpen, setIsRiskModalOpen] = useState(false);
@@ -234,7 +243,7 @@ function AppContent() {
 
         setIsLandingPage(false);
         setIsNotFound(isErr);
-        if (pageParam && ['privacy', 'terms', 'cookies', 'dpdp', 'data-collection'].includes(pageParam)) {
+        if (pageParam && ['privacy', 'terms', 'cookies', 'dpdp', 'data-collection', 'pricing', 'billing', 'admin-billing'].includes(pageParam)) {
           setSpecialPage(pageParam as any);
         } else {
           setSpecialPage(null);
@@ -290,6 +299,21 @@ function AppContent() {
     }
   }, [isLandingPage, activeTab, selectedCaseId, specialPage, isNotFound]);
 
+  // Fetch user subscription plan
+  const fetchUserPlan = async () => {
+    try {
+      const res = await authFetch('/api/billing/my-subscription');
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.subscription?.plan_id) {
+          setUserPlanId(data.subscription.plan_id);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load user subscription plan:', err);
+    }
+  };
+
   // Fetch initial cases and stats
   const fetchCases = async () => {
     try {
@@ -312,6 +336,7 @@ function AppContent() {
   useEffect(() => {
     if (fbUser) {
       fetchCases();
+      fetchUserPlan();
     }
   }, [fbUser]);
 
@@ -706,6 +731,31 @@ function AppContent() {
           setSelectedCaseId(null);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
+        userPlanId={userPlanId}
+        isPricingActive={specialPage === 'pricing'}
+        isBillingActive={specialPage === 'billing'}
+        isAdminBillingActive={specialPage === 'admin-billing'}
+        onOpenPricing={() => {
+          setIsLandingPage(false);
+          setIsNotFound(false);
+          setSpecialPage('pricing');
+          setSelectedCaseId(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenBilling={() => {
+          setIsLandingPage(false);
+          setIsNotFound(false);
+          setSpecialPage('billing');
+          setSelectedCaseId(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+        onOpenAdminBilling={() => {
+          setIsLandingPage(false);
+          setIsNotFound(false);
+          setSpecialPage('admin-billing');
+          setSelectedCaseId(null);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
 
       {/* Main Content Area */}
@@ -825,13 +875,50 @@ function AppContent() {
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
           />
+        ) : specialPage === 'pricing' ? (
+          <PricingView
+            currentPlanId={userPlanId}
+            onUpgradeSuccess={(newPlan) => {
+              setUserPlanId(newPlan);
+              notify('success', `Plan successfully upgraded to ${newPlan.toUpperCase()}!`);
+              setSpecialPage('billing');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            userEmail={currentUser?.email}
+            userName={currentUser?.full_name}
+            onNavigateTab={(tab) => {
+              setSpecialPage(null);
+              setActiveTab(tab);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
+        ) : specialPage === 'billing' ? (
+          <BillingView
+            onOpenPricing={() => {
+              setSpecialPage('pricing');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onPlanChanged={() => {
+              fetchUserPlan();
+            }}
+            userEmail={currentUser?.email}
+            userName={currentUser?.full_name}
+          />
+        ) : specialPage === 'admin-billing' ? (
+          currentUser?.role === 'admin' ? (
+            <AdminBillingSection />
+          ) : (
+            <div className="p-12 text-center text-sm text-slate-500">
+              Unauthorized: Administrator access required to view billing console.
+            </div>
+          )
         ) : isLandingPage ? (
           <LandingPageView
             onOpenWorkspace={handleOpenWorkspace}
             onOpenPage={(p) => {
               setIsLandingPage(false);
               setIsNotFound(false);
-              setSpecialPage(p);
+              setSpecialPage(p as any);
               setSelectedCaseId(null);
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
@@ -863,6 +950,14 @@ function AppContent() {
                 onOpenUpload={() => setActiveTab('upload')}
                 onRunSample={handleRunSample}
                 loadingSampleId={loadingSampleId}
+                onOpenPricing={() => {
+                  setSpecialPage('pricing');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onOpenBilling={() => {
+                  setSpecialPage('billing');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
               />
             )}
 
@@ -886,6 +981,10 @@ function AppContent() {
                 }}
                 onOpenDataCollection={() => {
                   setSpecialPage('data-collection');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onOpenPricing={() => {
+                  setSpecialPage('pricing');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
               />
@@ -1084,6 +1183,34 @@ function AppContent() {
                     className="text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 font-medium transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 rounded text-left"
                   >
                     Data Collection &amp; Privacy
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNotFound(false);
+                      setSpecialPage('pricing');
+                      setSelectedCaseId(null);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 font-medium transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 rounded text-left"
+                  >
+                    Pricing Plans (INR)
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNotFound(false);
+                      setSpecialPage('billing');
+                      setSelectedCaseId(null);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 font-medium transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 rounded text-left"
+                  >
+                    Billing &amp; Tax Receipts
                   </button>
                 </li>
                 <li>

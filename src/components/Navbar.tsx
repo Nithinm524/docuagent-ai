@@ -30,7 +30,10 @@ import {
   User,
   LogIn,
   LogOut,
-  ArrowRight
+  ArrowRight,
+  CreditCard,
+  DollarSign,
+  Sparkles
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle.tsx';
 
@@ -57,6 +60,13 @@ interface NavbarProps {
   onOpenNotifications?: () => void;
   onOpenLegalChecklist?: () => void;
   onOpenDataCollection?: () => void;
+  onOpenPricing?: () => void;
+  onOpenBilling?: () => void;
+  onOpenAdminBilling?: () => void;
+  userPlanId?: string;
+  isPricingActive?: boolean;
+  isBillingActive?: boolean;
+  isAdminBillingActive?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -74,7 +84,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLogout,
   onOpenNotifications,
   onOpenLegalChecklist,
-  onOpenDataCollection
+  onOpenDataCollection,
+  onOpenPricing,
+  onOpenBilling,
+  onOpenAdminBilling,
+  userPlanId,
+  isPricingActive = false,
+  isBillingActive = false,
+  isAdminBillingActive = false
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -234,6 +251,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   );
                 })}
+                {onOpenPricing && (
+                  <button
+                    onClick={onOpenPricing}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center space-x-1.5 whitespace-nowrap cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 ${
+                      isPricingActive
+                        ? 'bg-slate-100 dark:bg-slate-800/90 text-cyan-700 dark:text-cyan-300 font-semibold shadow-xs border border-slate-200 dark:border-slate-700/60'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100/60 dark:hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-500" aria-hidden="true" />
+                    <span>Pricing</span>
+                  </button>
+                )}
               </>
             )}
           </nav>
@@ -305,6 +335,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="text-[10px] uppercase font-mono px-1 py-0.2 rounded bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300">
                     {currentUser.role}
                   </span>
+                  <button
+                    type="button"
+                    onClick={onOpenBilling || onOpenPricing}
+                    className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer shadow-2xs"
+                    title="Current Subscription Plan (Click to manage)"
+                  >
+                    {userPlanId ? userPlanId.toUpperCase() : 'FREE'}
+                  </button>
                 </div>
                 {onLogout && (
                   <button
@@ -360,8 +398,51 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
 
               {moreMenuOpen && (
-                <div className="absolute right-0 mt-2 w-60 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs">
+                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs">
                   <div className="px-3 py-1.5 text-[10px] uppercase font-semibold text-slate-400 tracking-wider border-b border-slate-100 dark:border-slate-800/80">
+                    SaaS Plans &amp; Billing (INR)
+                  </div>
+
+                  {onOpenPricing && (
+                    <button
+                      onClick={() => {
+                        onOpenPricing();
+                        setMoreMenuOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center space-x-2 transition-colors cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span>Pricing &amp; Plans (₹0 - ₹3,999)</span>
+                    </button>
+                  )}
+
+                  {onOpenBilling && (
+                    <button
+                      onClick={() => {
+                        onOpenBilling();
+                        setMoreMenuOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center space-x-2 transition-colors cursor-pointer"
+                    >
+                      <CreditCard className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span>Billing &amp; Tax Invoices</span>
+                    </button>
+                  )}
+
+                  {currentUser?.role === 'admin' && onOpenAdminBilling && (
+                    <button
+                      onClick={() => {
+                        onOpenAdminBilling();
+                        setMoreMenuOpen(false);
+                      }}
+                      className="w-full px-3 py-2 text-left text-cyan-600 dark:text-cyan-400 font-semibold hover:bg-slate-50 dark:hover:bg-slate-800/80 flex items-center space-x-2 transition-colors cursor-pointer"
+                    >
+                      <DollarSign className="w-3.5 h-3.5" />
+                      <span>Admin Billing &amp; Quotas</span>
+                    </button>
+                  )}
+
+                  <div className="px-3 py-1.5 text-[10px] uppercase font-semibold text-slate-400 tracking-wider border-b border-t border-slate-100 dark:border-slate-800/80 mt-1">
                     Compliance &amp; Governance
                   </div>
 
@@ -560,6 +641,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 );
               })}
+              {onOpenPricing && (
+                <button
+                  onClick={() => {
+                    onOpenPricing();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-lg text-xs font-medium text-cyan-600 dark:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2.5 text-left cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-cyan-500" />
+                  <span>Pricing Plans (INR)</span>
+                </button>
+              )}
+              {onOpenBilling && (
+                <button
+                  onClick={() => {
+                    onOpenBilling();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="w-full px-3 py-2.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center space-x-2.5 text-left cursor-pointer"
+                >
+                  <CreditCard className="w-4 h-4 text-cyan-500" />
+                  <span>Billing &amp; Invoices</span>
+                </button>
+              )}
             </>
           )}
 

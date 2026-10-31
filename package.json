@@ -10,8 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/scanning-experience.test.ts server/reviewer-decision.test.ts",
-    "test:all": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/pipeline.test.ts server/scanning-experience.test.ts server/reviewer-decision.test.ts",
+    "test": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/scanning-experience.test.ts server/reviewer-decision.test.ts server/billing.test.ts",
+    "test:billing": "tsx --test server/billing.test.ts",
+    "test:all": "tsx --test src/shared/validation.test.ts src/shared/quality-seo.test.ts server/security.test.ts server/pipeline.test.ts server/scanning-experience.test.ts server/reviewer-decision.test.ts server/billing.test.ts",
     "scan:secrets": "node scripts/scan-secrets.js",
     "audit": "npm audit --legacy-peer-deps"
   },

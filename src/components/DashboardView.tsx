@@ -11,7 +11,7 @@
  * - Mobile QR Access Card
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileText,
   CheckCircle2,
@@ -30,7 +30,11 @@ import {
   ChevronRight,
   Inbox,
   Calendar,
-  Filter
+  Filter,
+  Sparkles,
+  CreditCard,
+  ArrowUpRight,
+  Zap
 } from 'lucide-react';
 import {
   CaseRecord,
@@ -40,6 +44,8 @@ import {
 } from '../shared/types.ts';
 import { SYNTHETIC_SCENARIOS } from '../shared/samples.ts';
 import { MobileAccessCard } from './MobileAccessCard.tsx';
+import { authFetch } from '../utils/authFetch.ts';
+import { formatInrCurrency, DEFAULT_PLANS, type PlanId } from '../shared/plans.ts';
 
 interface DashboardViewProps {
   cases: CaseRecord[];
@@ -58,6 +64,8 @@ interface DashboardViewProps {
   onRunSample: (scenarioId: string) => Promise<void>;
   loadingSampleId: string | null;
   isLoading?: boolean;
+  onOpenPricing?: () => void;
+  onOpenBilling?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -67,7 +75,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenUpload,
   onRunSample,
   loadingSampleId,
-  isLoading = false
+  isLoading = false,
+  onOpenPricing,
+  onOpenBilling
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -75,6 +85,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [docTypeFilter, setDocTypeFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
+
+  // Subscription & Monthly Usage Tracking State
+  const [subData, setSubData] = useState<{
+    planId: PlanId;
+    planName: string;
+    documentsUsed: number;
+    documentAllowance: number;
+    remainingAllowance: number;
+    currentPeriodEnd: string;
+    status: string;
+  }>({
+    planId: 'free',
+    planName: 'Free Plan',
+    documentsUsed: 0,
+    documentAllowance: 10,
+    remainingAllowance: 10,
+    currentPeriodEnd: '',
+    status: 'active'
+  });
+
+  useEffect(() => {
+    let mounted = true;
+    authFetch('/api/billing/my-subscription')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && mounted) {
+          const planKey = (data.subscription?.plan_id || 'free') as PlanId;
+          const planConfig = DEFAULT_PLANS[planKey] || DEFAULT_PLANS.free;
+          setSubData({
+            planId: planKey,
+            planName: planConfig.name,
+            documentsUsed: data.usage?.documentsUploaded ?? 0,
+            documentAllowance: data.usage?.documentAllowance ?? planConfig.documentAllowanceMonthly,
+            remainingAllowance: data.usage?.remainingAllowance ?? planConfig.documentAllowanceMonthly,
+            currentPeriodEnd: data.subscription?.current_period_end || '',
+            status: data.subscription?.status || 'active'
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [cases.length]);
 
   // Advanced Search & Filter States
   const [isAdvancedOpen, setIsAdvancedOpen] = useState<boolean>(false);
@@ -357,7 +411,128 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Compact Metrics Row */}
+      {/* 2. SaaS Usage Progress Card */}
+      {(() => {
+        const used = subData.documentsUsed;
+        const max = subData.documentAllowance;
+        const remaining = Math.max(0, max - used);
+        const pct = max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 100;
+        const renewalFormatted = subData.currentPeriodEnd
+          ? new Date(subData.currentPeriodEnd).toLocaleDateString('en-IN', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric'
+            })
+          : 'Monthly renewal';
+
+        let meterColor = 'bg-cyan-500';
+        if (pct >= 100) meterColor = 'bg-rose-500';
+        else if (pct >= 90) meterColor = 'bg-amber-500';
+        else if (pct >= 70) meterColor = 'bg-indigo-500';
+
+        return (
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] p-4 sm:p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-cyan-100 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60">
+                  {subData.planName}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Billing Renewal: <span className="font-semibold text-slate-700 dark:text-slate-300">{renewalFormatted}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {onOpenPricing && (
+                  <button
+                    onClick={onOpenPricing}
+                    className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Upgrade Plan</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onOpenBilling && (
+                  <button
+                    onClick={onOpenBilling}
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                  >
+                    • Manage Billing
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3 text-xs">
+              <div>
+                <span className="text-slate-400 text-[11px]">Documents Used:</span>
+                <div className="text-lg font-black text-slate-900 dark:text-white font-mono">
+                  {used} <span className="text-xs font-normal text-slate-400">/ {max}</span>
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[11px]">Remaining Allowance:</span>
+                <div className="text-lg font-black text-cyan-600 dark:text-cyan-400 font-mono">
+                  {remaining} docs
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[11px]">Cycle Utilization:</span>
+                <div className="text-lg font-black text-slate-800 dark:text-slate-200 font-mono">
+                  {pct}%
+                </div>
+              </div>
+            </div>
+
+            {/* Meter Bar */}
+            <div className="w-full bg-slate-100 dark:bg-slate-800/80 rounded-full h-2.5 overflow-hidden mb-2">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${meterColor}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+
+            {/* Contextual Warnings */}
+            {pct >= 100 ? (
+              <div className="mt-2.5 p-2.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-800 dark:text-rose-300 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertOctagon className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>100% quota exhausted. Upgrades activate additional document capacity immediately in INR.</span>
+                </div>
+                {onOpenPricing && (
+                  <button
+                    onClick={onOpenPricing}
+                    className="font-bold text-rose-700 dark:text-rose-300 underline cursor-pointer shrink-0"
+                  >
+                    Upgrade Now
+                  </button>
+                )}
+              </div>
+            ) : pct >= 90 ? (
+              <div className="mt-2.5 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Usage Warning (90%+): Approaching monthly document intake threshold ({remaining} left).</span>
+                </div>
+                {onOpenPricing && (
+                  <button
+                    onClick={onOpenPricing}
+                    className="font-bold text-amber-700 dark:text-amber-300 underline cursor-pointer shrink-0"
+                  >
+                    Upgrade
+                  </button>
+                )}
+              </div>
+            ) : pct >= 70 ? (
+              <div className="mt-2.5 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900 text-xs text-indigo-800 dark:text-indigo-300 flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span>Notice: 70% of monthly document quota utilized.</span>
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
+
+      {/* 3. Compact Metrics Row */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Total Documents */}
         <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800/80 rounded-xl p-3.5 flex flex-col justify-between shadow-xs">

@@ -323,6 +323,14 @@ class AuthService {
     return undefined;
   }
 
+  public getAllUsers(): UserAccount[] {
+    return Array.from(this.users.values());
+  }
+
+  public getUserCount(): number {
+    return this.users.size;
+  }
+
   /**
    * Revokes all active sessions for a user ID.
    */

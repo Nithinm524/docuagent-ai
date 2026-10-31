@@ -54,6 +54,15 @@ import {
   validateFindingResolutionBody,
   validateReviewActionBody
 } from './validators.ts';
+import { billingStore } from './billingStore.ts';
+import { razorpayService } from './razorpay.ts';
+import {
+  getUserEntitlementStatus,
+  checkFeatureEntitlement,
+  requireFeature,
+  checkQuota
+} from './entitlements.ts';
+import { type PlanId } from '../src/shared/plans.ts';
 
 const api = express();
 
@@ -143,7 +152,14 @@ api.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-api.use(express.json({ limit: '15mb' }));
+api.use(
+  express.json({
+    limit: '15mb',
+    verify: (req: any, _res: any, buf: Buffer) => {
+      req.rawBody = buf.toString('utf-8');
+    }
+  })
+);
 
 // Helper to log errors safely
 function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) {
@@ -814,6 +830,29 @@ api.post(
       }
     }
 
+    const user = (req as any).user;
+    const userId = user?.userId || 'guest_user';
+    const tenantId = user?.tenantId;
+
+    // 3. Document Processing Quota Verification
+    const quotaCheck = billingStore.canProcessDocument(userId, tenantId);
+    if (!quotaCheck.allowed) {
+      log({
+        level: 'WARN',
+        operation: 'QUOTA_LIMIT_BLOCKED',
+        requestId: reqId,
+        message: `User ${userId} reached monthly document limit (${quotaCheck.used}/${quotaCheck.allowance}).`
+      });
+      return res.status(429).json({
+        error: quotaCheck.reason || 'Monthly document processing allowance reached.',
+        code: 'QUOTA_EXCEEDED',
+        documentsUsed: quotaCheck.used,
+        documentAllowance: quotaCheck.allowance,
+        remainingAllowance: 0,
+        upgradeUrl: '/pricing'
+      });
+    }
+
     // Lock idempotency key to prevent race conditions during active processing
     idempotencyStore.setProcessing(idempotencyKey, computePayloadFingerprint(req.body));
 
@@ -875,6 +914,13 @@ api.post(
 
         idempotencyStore.complete(idempotencyKey, 201, caseRecord);
 
+        // Deduct usage quota upon accepted document ingestion
+        billingStore.recordDocumentProcessed(userId, {
+          tenantId,
+          pages: 1,
+          success: true
+        });
+
         log({
           level: 'INFO',
           operation: 'CASE_PROCESSED_STREAM',
@@ -902,6 +948,11 @@ api.post(
         return;
       } catch (err: any) {
         idempotencyStore.fail(idempotencyKey, 500, { error: err.message });
+        billingStore.recordDocumentProcessed(userId, {
+          tenantId,
+          pages: 1,
+          success: false
+        });
         sendEvent('error', { error: err.message || 'Processing workflow failed.' });
         res.end();
         return;
@@ -927,6 +978,13 @@ api.post(
       // Complete idempotency record
       idempotencyStore.complete(idempotencyKey, 201, caseRecord);
 
+      // Deduct usage quota upon accepted document ingestion
+      billingStore.recordDocumentProcessed(userId, {
+        tenantId,
+        pages: 1,
+        success: true
+      });
+
       log({
         level: 'INFO',
         operation: 'CASE_PROCESSED',
@@ -949,6 +1007,11 @@ api.post(
       res.status(201).json(caseRecord);
     } catch (err: any) {
       idempotencyStore.fail(idempotencyKey, 500, { error: err.message });
+      billingStore.recordDocumentProcessed(userId, {
+        tenantId,
+        pages: 1,
+        success: false
+      });
       throw err;
     }
   })
@@ -1695,6 +1758,279 @@ api.post('/api/admin/restore', standardApiLimiter, requireAuth(['admin']), (req:
     sendError(res, 500, 'RESTORE_FAILED', err.message, reqId);
   }
 });
+
+// -------------------------------------------------------------
+// 14. FREEMIUM SAAS BILLING & RAZORPAY INTEGRATION ENDPOINTS
+// -------------------------------------------------------------
+
+// 1. GET /api/billing/plans - Public catalog of plans and quotas
+api.get('/api/billing/plans', standardApiLimiter, (_req: Request, res: Response) => {
+  res.json({
+    plans: billingStore.getPlans(),
+    currency: 'INR',
+    isLiveGateway: razorpayService.isLiveMode(),
+    razorpayKeyId: razorpayService.getKeyId()
+  });
+});
+
+// 2. GET /api/billing/my-subscription - User's active subscription, usage, and quotas
+api.get('/api/billing/my-subscription', standardApiLimiter, optionalAuth, (req: Request, res: Response) => {
+  const user = (req as any).user;
+  const userId = user?.userId || 'guest_user';
+  const tenantId = user?.tenantId;
+  const status = getUserEntitlementStatus(userId, tenantId);
+  const subscription = billingStore.getSubscription(userId, tenantId);
+  const usage = billingStore.getUsage(userId, tenantId);
+
+  res.json({
+    subscription,
+    status,
+    usage: {
+      cycleMonth: usage.cycle_month,
+      documentsUploaded: usage.documents_uploaded,
+      pagesProcessed: usage.pages_processed,
+      successfulJobs: usage.successful_jobs,
+      failedJobs: usage.failed_jobs,
+      documentAllowance: usage.document_allowance,
+      remainingAllowance: usage.remaining_allowance,
+      lastProcessedAt: usage.last_processed_at
+    },
+    razorpayKeyId: razorpayService.getKeyId(),
+    isLiveGateway: razorpayService.isLiveMode()
+  });
+});
+
+// 3. POST /api/billing/create-order - Create Razorpay order with trusted server price
+api.post(
+  '/api/billing/create-order',
+  standardApiLimiter,
+  requireAuth(),
+  asyncHandler(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const { planId, notes } = req.body || {};
+
+    if (!planId || !['starter', 'professional', 'business', 'enterprise'].includes(planId)) {
+      return sendError(res, 400, 'INVALID_PLAN', 'Valid paid plan ID (starter, professional, business) is required.', (req as any).requestId);
+    }
+
+    if (planId === 'enterprise') {
+      return res.json({
+        custom: true,
+        message: 'Enterprise plans require custom agreement. Please contact sales at sales@docuagent.ai.',
+        planId: 'enterprise'
+      });
+    }
+
+    const orderResult = await razorpayService.createOrder({
+      userId: user.userId,
+      userEmail: user.email,
+      userName: user.name,
+      tenantId: user.tenantId,
+      planId: planId as PlanId,
+      notes
+    });
+
+    res.status(201).json(orderResult);
+  })
+);
+
+// 4. POST /api/billing/verify-payment - Verify HMAC SHA-256 signature and activate subscription
+api.post(
+  '/api/billing/verify-payment',
+  standardApiLimiter,
+  requireAuth(),
+  asyncHandler(async (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan_id, payment_method } = req.body || {};
+    const reqId = (req as any).requestId;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return sendError(
+        res,
+        400,
+        'MISSING_PAYMENT_FIELDS',
+        'Parameters razorpay_order_id, razorpay_payment_id, and razorpay_signature are required.',
+        reqId
+      );
+    }
+
+    const verification = await razorpayService.verifyAndActivatePayment({
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      signature: razorpay_signature,
+      userId: user.userId,
+      userEmail: user.email,
+      tenantId: user.tenantId,
+      planId: (plan_id as PlanId) || 'starter',
+      paymentMethod: payment_method
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment verified successfully. Subscription activated.',
+      subscription: verification.subscription,
+      transaction: verification.transaction
+    });
+  })
+);
+
+// 5. POST /api/billing/payment-failed - Record failed payment without granting access
+api.post(
+  '/api/billing/payment-failed',
+  standardApiLimiter,
+  requireAuth(),
+  (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const { orderId, paymentId, planId, errorCode, errorDescription } = req.body || {};
+
+    const tx = razorpayService.handlePaymentFailure({
+      orderId: orderId || `order_${Date.now()}`,
+      paymentId,
+      userId: user.userId,
+      userEmail: user.email,
+      tenantId: user.tenantId,
+      planId: (planId as PlanId) || 'free',
+      errorCode,
+      errorDescription
+    });
+
+    res.json({
+      success: false,
+      message: 'Payment failure recorded.',
+      transaction: tx
+    });
+  }
+);
+
+// 6. POST /api/billing/cancel-subscription - Cancel active subscription
+api.post(
+  '/api/billing/cancel-subscription',
+  standardApiLimiter,
+  requireAuth(),
+  (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const sub = billingStore.cancelSubscription(user.userId);
+    res.json({
+      success: true,
+      message: `Subscription to ${sub.plan_id.toUpperCase()} cancelled. It will remain active until ${sub.current_period_end}.`,
+      subscription: sub
+    });
+  }
+);
+
+// 7. GET /api/billing/transactions - Get user transaction history
+api.get(
+  '/api/billing/transactions',
+  standardApiLimiter,
+  requireAuth(),
+  (req: Request, res: Response) => {
+    const user = (req as any).user;
+    const txs = billingStore.getTransactions(user.userId);
+    res.json({ transactions: txs });
+  }
+);
+
+// 8. POST /api/billing/webhook - Razorpay Webhook with HMAC signature and idempotency
+api.post(
+  '/api/billing/webhook',
+  asyncHandler(async (req: Request, res: Response) => {
+    const signature = (req.headers['x-razorpay-signature'] as string) || '';
+    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+
+    const result = await razorpayService.processWebhook(rawBody, signature, req.body);
+    res.json({ status: 'ok', handled: result.handled, reason: result.reason });
+  })
+);
+
+// 9. POST /api/billing/test-signature - Helper for sandbox/test suite execution
+api.post('/api/billing/test-signature', (req: Request, res: Response) => {
+  const { orderId, paymentId } = req.body || {};
+  if (!orderId || !paymentId) {
+    return sendError(res, 400, 'INVALID_PARAMS', 'orderId and paymentId are required.', (req as any).requestId);
+  }
+  const signature = razorpayService.generateTestSignature(orderId, paymentId);
+  res.json({ signature });
+});
+
+// -------------------------------------------------------------
+// 15. ADMINISTRATOR BILLING DASHBOARD ENDPOINTS
+// -------------------------------------------------------------
+
+api.get(
+  '/api/admin/billing/overview',
+  standardApiLimiter,
+  requireAuth(['admin']),
+  (req: Request, res: Response) => {
+    const registeredUsers = authService.getUserCount?.() || 10;
+    const stats = billingStore.getOverviewStats(registeredUsers);
+    res.json(stats);
+  }
+);
+
+api.get(
+  '/api/admin/billing/subscriptions',
+  standardApiLimiter,
+  requireAuth(['admin']),
+  (_req: Request, res: Response) => {
+    const subs = billingStore.getAllSubscriptions();
+    res.json({ subscriptions: subs });
+  }
+);
+
+api.get(
+  '/api/admin/billing/transactions',
+  standardApiLimiter,
+  requireAuth(['admin']),
+  (_req: Request, res: Response) => {
+    const txs = billingStore.getTransactions();
+    res.json({ transactions: txs });
+  }
+);
+
+api.put(
+  '/api/admin/billing/plans',
+  standardApiLimiter,
+  requireAuth(['admin']),
+  (req: Request, res: Response) => {
+    const { planId, updates } = req.body || {};
+    const reqId = (req as any).requestId;
+
+    if (!planId || !['free', 'starter', 'professional', 'business', 'enterprise'].includes(planId)) {
+      return sendError(res, 400, 'INVALID_PLAN', 'Valid plan ID is required.', reqId);
+    }
+    if (!updates || typeof updates !== 'object') {
+      return sendError(res, 400, 'INVALID_UPDATES', 'Updates payload is required.', reqId);
+    }
+
+    const updated = billingStore.updatePlan(planId as PlanId, updates);
+    res.json({
+      success: true,
+      message: `Plan ${planId} updated successfully.`,
+      plan: updated
+    });
+  }
+);
+
+api.post(
+  '/api/admin/billing/user-subscription',
+  standardApiLimiter,
+  requireAuth(['admin']),
+  (req: Request, res: Response) => {
+    const { userId, planId, status } = req.body || {};
+    const reqId = (req as any).requestId;
+
+    if (!userId || typeof userId !== 'string') {
+      return sendError(res, 400, 'INVALID_USER_ID', 'User ID is required.', reqId);
+    }
+
+    const updated = billingStore.setSubscriptionStatus(userId, status || 'active', planId as PlanId);
+    res.json({
+      success: true,
+      message: `Updated subscription for ${userId}.`,
+      subscription: updated
+    });
+  }
+);
 
 // -------------------------------------------------------------
 // GLOBAL ERROR HANDLER

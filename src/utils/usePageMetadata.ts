@@ -79,6 +79,24 @@ export const PAGE_METADATA: Record<string, PageMetadataConfig> = {
       'Technical readiness assessment, data principal rights, grievance redressal, and compliance framework for India’s Digital Personal Data Protection Act.',
     canonicalPath: '/?page=dpdp'
   },
+  pricing: {
+    title: 'Subscription Plans & Pricing | DOCUAGENT AI',
+    description:
+      'Predictable monthly subscription plans in Indian Rupees (INR) for automated document review, AI extraction, and compliance workflows.',
+    canonicalPath: '/?page=pricing'
+  },
+  billing: {
+    title: 'Billing & Subscriptions | DOCUAGENT AI',
+    description:
+      'Manage your DOCUAGENT AI plan tier, document usage allowances, Razorpay payment receipts, and GST invoices.',
+    canonicalPath: '/?page=billing'
+  },
+  adminBilling: {
+    title: 'Admin Billing & Revenue Console | DOCUAGENT AI',
+    description:
+      'Administrator dashboard for subscriber counts, verified INR revenue, and dynamic server quota configuration.',
+    canonicalPath: '/?page=admin-billing'
+  },
   notFound: {
     title: 'Page Not Found | DOCUAGENT AI',
     description:
